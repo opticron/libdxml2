@@ -41,68 +41,26 @@
 //	support [last()] with math (yes, it's lame)? (last is $-1)
 
 module kxml.xml;
-version(Tango) {
-	import tango.text.Util:isspace=isSpace,stripl=triml,strip=trim,stripr=trimr,find=locatePattern,split,replace=substitute;
-	import tango.text.convert.Integer:tostring=toString,atoi=toInt;
-	import tango.text.convert.Float:tostring=toString,atof=toFloat;
-	import tango.text.Ascii:icmp=icompare,cmp=compare;
-	import tango.text.Regex;
-	import tango.stdc.stdio:printf;
-	import tango.core.Exception:IllegalArgumentException;
-	alias char[] string;
-	string regrep(string input,string pattern,string delegate(string) translator) {
-		string tmpdel(RegExpT!(char) m) {
-			return translator(m.match(0));
-		}
-		auto rgxp = Regex(pattern,"g");
-		return rgxp.replaceAll(input,&tmpdel);
+import std.conv:to;
+import std.string:strip,stripr=stripRight,stripl=stripLeft,split,replace,find=indexOf,cmp,icmp,isNumeric,toStringz;
+import core.stdc.stdlib:catof=atof;
+import std.ascii:isspace=isWhite;
+import core.stdc.stdio:printf;
+real atof(string data) {
+	// Hacky McHackington.
+	return catof(toStringz(data));
+}
+import std.regex;
+string regrep(string input, string pattern, string delegate(string) translator) {
+	string tmpdel(Captures!(string,size_t) m) {
+		return translator(m.hit);
 	}
-	bool isNumeric(string input) {
-		try atof(input);
-		catch (IllegalArgumentException e) return false;
-		return true;
-	}
-	private void logline(string str) { printf("%*s",str); }
-} else {
-	version(D_Version2) {
-		import std.conv:to;
-		import std.string:strip,stripr=stripRight,stripl=stripLeft,split,replace,find=indexOf,cmp,icmp,isNumeric,toStringz;
-		import core.stdc.stdlib:catof=atof;
-		import std.ascii:isspace=isWhite;
-		import core.stdc.stdio:printf;
-		int atoi(string data) {
-			return to!(int)(data);
-		}
-		real atof(string data) {
-			// Hacky McHackington.
-			return catof(toStringz(data));
-		}
-		string tostring(T)(T data) {
-			return to!(string)(data);
-		}
-		import std.regex;
-		string regrep(string input, string pattern, string delegate(string) translator) {
-			string tmpdel(Captures!(string,size_t) m) {
-				return translator(m.hit);
-			}
-			return std.regex.replace!(tmpdel)(input, regex(pattern, "g"));
-		}
-	} else {
-		import std.string:tostring=toString,strip,stripr,stripl,split,replace,find,cmp,icmp,atoi,atof,isNumeric;
-		import std.ctype:isspace;
-		import std.regexp:sub,RegExp;
-		string regrep(string input,string pattern,string delegate(string) translator) {
-			string tmpdel(RegExp m) {
-				return translator(m.match(0));
-			}
-			return sub(input,pattern,&tmpdel,"g");
-		}
-	}
-	import std.stdio;
-	private void logline(string str) {
-		// 64 bit DMD doesn't like calling varargs very much.
-		std.stdio.writef("%s", str);
-	}
+	return std.regex.replace!(tmpdel)(input, regex(pattern, "g"));
+}
+import std.stdio;
+private void logline(string str) {
+	// 64 bit DMD doesn't like calling varargs very much.
+	std.stdio.writef("%s", str);
 }
 
 /**
@@ -234,13 +192,13 @@ class XmlNode
 	/// Set an attribute to an integer value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
 	XmlNode setAttribute(string name, long value) {
-		return setAttribute(name, tostring(value));
+		return setAttribute(name, to!(string)(value));
 	}
 
 	/// Set an attribute to a float value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
 	XmlNode setAttribute(string name, float value) {
-		return setAttribute(name, tostring(value));
+		return setAttribute(name, to!(string)(value));
 	}
 
 	/// Remove the attribute with name.
@@ -870,13 +828,13 @@ class XmlNode
 		bool[]ordTerms;
 		ordTerms.length = numOrdTerms + 1;
 		ordTerms[0] = res[0];
-		debug(xpath)logline("res[0]="~tostring(res[0])~"\n");
+		debug(xpath)logline("res[0]="~to!(string)(res[0])~"\n");
 		numOrdTerms = 0; // we're using this as current position, now
 		foreach (i,attr;attrlist) if (i%2) {
 			if (attr == "and") {
-				debug(xpath)logline("combining anded terms on ord term "~tostring(numOrdTerms)~" and i="~tostring(i)~" with res.length="~tostring(res.length)~" and attrlist.length="~tostring(attrlist.length)~"\n");
+				debug(xpath)logline("combining anded terms on ord term "~to!(string)(numOrdTerms)~" and i="~to!(string)(i)~" with res.length="~to!(string)(res.length)~" and attrlist.length="~to!(string)(attrlist.length)~"\n");
 				ordTerms[numOrdTerms] &= res[i+1];
-				debug(xpath)logline("res["~tostring(i+1)~"]="~tostring(res[i+1])~"\n");
+				debug(xpath)logline("res["~to!(string)(i+1)~"]="~to!(string)(res[i+1])~"\n");
 			} else if (attr == "or") {
 				numOrdTerms++;
 				ordTerms[numOrdTerms] = res[i+1];
@@ -887,7 +845,7 @@ class XmlNode
 		// now that results have been determined, map them to a final result using "and" and "or"
 		bool ret = false;
 		foreach (val;ordTerms) ret |= val;
-		debug(xpath)logline("Ended up with "~tostring(ret)~"\n");
+		debug(xpath)logline("Ended up with "~to!(string)(ret)~"\n");
 		return ret;
 	}
 	
@@ -1359,7 +1317,7 @@ string xmlDecode(string src) {
 	// take care of decimal character entities
 	src = regrep(src,"&#\\d{1,8};",(string m) {
 		auto cnum = m[2..$-1];
-		dchar dnum = cast(dchar)atoi(cnum);
+		dchar dnum = cast(dchar)to!(int)(cnum);
 		return quickUTF8(dnum);
 	});
 	// take care of hex character entities
