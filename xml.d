@@ -106,11 +106,11 @@ template isGoodType(R)
  * Returns: An XmlNode with no name that is the root of the document that was read.
  * Throws: XmlError on any parsing errors.
  */
-XmlNode readDocument(R)(R src, bool preserveWS=false)
+auto readDocument(R)(R src, bool preserveWS=false)
 if (isGoodType!R)
 {
 	string pointcpy = src;
-	XmlNode root = new XmlNode(null);
+	auto root = new XmlNode!R();
 	try {
 		root.addChildren(src,preserveWS);
 	} catch (XmlError e) {
@@ -146,12 +146,12 @@ class XPathError : Exception {
  * node.addChild(new XmlNode("mynode").setAttribute("x", 50).
  *     addChild(new XmlNode("Waldo").addCData("Hello!"))).write("myfile.xml");
  * --------------------------------*/
-class XmlNode
+class XmlNode(R=string) if (isGoodType!R)
 {
-	protected XmlDocument _docroot;
+	protected XmlDocument!R _docroot;
 	protected string _name;
 	protected string[string] _attributes;
-	protected XmlNode[]      _children;
+	protected XmlNode!R[]      _children;
 
 
 
@@ -237,7 +237,7 @@ class XmlNode
 
 	/// Get all child nodes associated with this object.
 	/// Returns: An raw, uncopied array of all child nodes.
-	XmlNode[] getChildren() {
+	XmlNode!R[] getChildren() {
 		return _children;
 	}
 
@@ -254,8 +254,8 @@ class XmlNode
 	}
 
 	/// Add a child Node of cdata (text).
-	XmlNode addCData(string cdata) {
-		auto cd = (_docroot?_docroot.allocCData:new CData);
+	XmlNode!R addCData(string cdata) {
+		auto cd = (_docroot?_docroot.allocCData:new CData!R);
 		cd.setCData(cdata);
 		addChild(cd);
 		return this;
@@ -263,19 +263,19 @@ class XmlNode
 
 	/// Check to see if this node is a CData node.
 	final bool isCData() {
-		if (cast(CData)this) return true;
+		if (cast(CData!R)this) return true;
 		return false;
 	}
 
 	/// Check to see if this node is a XmlPI node.
 	final bool isXmlPI() {
-		if (cast(XmlPI)this) return true;
+		if (cast(XmlPI!R)this) return true;
 		return false;
 	}
 
 	/// Check to see if this node is a XmlComment node.
 	final bool isXmlComment() {
-		if (cast(XmlComment)this) return true;
+		if (cast(XmlComment!R)this) return true;
 		return false;
 	}
 
@@ -432,7 +432,7 @@ class XmlNode
 		xsrc = xsrc[slice..$];
 		debug(xml)logline("I found cdata text: "~token~"\n");
 		// DO NOT CHANGE THIS TO USE THE CONSTRUCTOR, BECAUSE THE CONSTRUCTOR IS FOR USER USE
-		auto cd = (_docroot?_docroot.allocCData:new CData);
+		auto cd = (_docroot?_docroot.allocCData:new CData!R);
 		cd._cdata = token;
 		parent.addChild(cd);
 	}
@@ -454,18 +454,18 @@ class XmlNode
 		xsrc = stripl(xsrc[1..$]);
 		// rip off name
 		string name = getWSToken(xsrc);
-		XmlPI newnode;
+		XmlPI!R newnode;
 		if (name[$-1] == '?') {
 			// and we're at the end of the element
 			name = name[0..$-1];
-			newnode = (_docroot?_docroot.allocXmlPI:new XmlPI);
+			newnode = (_docroot?_docroot.allocXmlPI:new XmlPI!R);
 			newnode.setName(name);
 			parent.addChild(newnode);
 			return;
 		}
 		// rip off attributes while looking for ?>
 		debug(xml)logline("Got a "~name~" XML processing instruction\n");
-		newnode = (_docroot?_docroot.allocXmlPI:new XmlPI);
+		newnode = (_docroot?_docroot.allocXmlPI:new XmlPI!R);
 		newnode.setName(name);
 		xsrc = stripl(xsrc);
 		while(xsrc.length >= 2 && xsrc[0..2] != "?>") {
@@ -487,7 +487,7 @@ class XmlNode
 		xsrc = xsrc[slice+3..$];
 		debug(xml)logline("I found cdata text: "~token~"\n");
 		// DO NOT CHANGE THIS TO USE THE CONSTRUCTOR, BECAUSE THE CONSTRUCTOR IS FOR USER USE
-		auto cd = (_docroot?_docroot.allocCData:new CData);
+		auto cd = (_docroot?_docroot.allocCData:new CData!R);
 		cd._cdata = token;
 		parent.addChild(cd);
 	}
@@ -500,7 +500,7 @@ class XmlNode
 		slice = readUntil(xsrc,"-->");
 		token = xsrc[0..slice];
 		xsrc = xsrc[slice+3..$];
-		auto x = (_docroot?_docroot.allocXmlComment:new XmlComment);
+		auto x = (_docroot?_docroot.allocXmlComment:new XmlComment!R);
 		x._comment = token;
 		parent.addChild(x);
 	}
@@ -523,7 +523,7 @@ class XmlNode
 		string name = getWSToken(xsrc);
 		// rip off attributes while looking for ?>
 		debug(xml)logline("Got a "~name~" open tag\n");
-		auto newnode = (_docroot?_docroot.allocXmlNode:new XmlNode);
+		auto newnode = (_docroot?_docroot.allocXmlNode:new XmlNode!R);
 		newnode.setName(name);
 		xsrc = stripl(xsrc);
 		while(xsrc.length && xsrc[0] != '/' && xsrc[0] != '>') {
@@ -917,7 +917,7 @@ class XmlNode
 }
 
 /// A class specialization for CData nodes.
-class CData : XmlNode
+class CData(R=string) : XmlNode!(R)
 {
 	private string _cdata;
 
@@ -993,33 +993,33 @@ class CData : XmlNode
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override XmlNode setAttribute(string name, string value) {
+	override XmlNode!R setAttribute(string name, string value) {
 		throw new XmlError("CData nodes do not have attributes to set.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override XmlNode setAttribute(string name, long value) {
+	override XmlNode!R setAttribute(string name, long value) {
 		throw new XmlError("CData nodes do not have attributes to set.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override XmlNode setAttribute(string name, float value) {
+	override XmlNode!R setAttribute(string name, float value) {
 		throw new XmlError("CData nodes do not have attributes to set.");
 	}
 
 	/// This throws an exception because CData nodes do not have children.
-	override XmlNode addChild(XmlNode newNode) {
+	override XmlNode!R addChild(XmlNode!R newNode) {
 		throw new XmlError("Cannot add a child node to CData.");
 	}
 
 	/// This throws an exception because CData nodes do not have children.
-	override XmlNode addCData(string cdata) {
+	override XmlNode!R addCData(string cdata) {
 		throw new XmlError("Cannot add a child node to CData.");
 	}
 }
 
 /// A class specialization for XML instructions.
-class XmlPI : XmlNode {
+class XmlPI(R=string) : XmlNode!R {
 	this(){}
 
 	/// Override the constructor that takes a name so that it's accessible.
@@ -1072,19 +1072,19 @@ class XmlPI : XmlNode {
 	override string asCloseTag() { return null; }
 
 	/// You can't add a child to something that can't have children.  There is no adoption in XML world.
-	override XmlNode addChild(XmlNode newNode) {
+	override XmlNode!R addChild(XmlNode!R newNode) {
 		throw new XmlError("Cannot add a child node to XmlPI.");
 	}
 
 	/// You can't add a child to something that can't have children.  There is no adoption in XML world.
 	/// Especially for red-headed stepchildren CData nodes.
-	override XmlNode addCData(string cdata) {
+	override XmlNode!R addCData(string cdata) {
 		throw new XmlError("Cannot add a child node to XmlPI.");
 	}
 }
 
 /// A class specialization for XML comments.
-class XmlComment : XmlNode {
+class XmlComment(R=string) : XmlNode!R {
 	string _comment;
 	this(){}
 	this(string comment) {
@@ -1161,27 +1161,27 @@ class XmlComment : XmlNode {
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode setAttribute(string name, string value) {
+	override XmlNode!R setAttribute(string name, string value) {
 		throw new XmlError("Comment nodes do not have attributes to set.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode setAttribute(string name, long value) {
+	override XmlNode!R setAttribute(string name, long value) {
 		throw new XmlError("Comment nodes do not have attributes to set.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode setAttribute(string name, float value) {
+	override XmlNode!R setAttribute(string name, float value) {
 		throw new XmlError("Comment nodes do not have attributes to set.");
 	}
 
 	/// Comments don't have children. (this throws an exception)
-	override XmlNode addChild(XmlNode newNode) {
+	override XmlNode!R addChild(XmlNode!R newNode) {
 		throw new XmlError("Cannot add a child node to comment.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode addCData(string cdata) {
+	override XmlNode!R addCData(string cdata) {
 		throw new XmlError("Cannot add a child node to comment.");
 	}
 }
@@ -1207,19 +1207,19 @@ class XmlComment : XmlNode {
   *--------------------------
   */
 public int prealloc = 50;
-class XmlDocument:XmlNode {
+class XmlDocument(R=string) : XmlNode!R {
 	// this should inherit the reset and toString that we want
-	protected XmlNode[]xmlNodes;
-	protected XmlComment[]xmlCommentNodes;
-	protected CData[]cdataNodes;
-	protected XmlPI[]xmlPINodes;
+	protected XmlNode!R[]xmlNodes;
+	protected XmlComment!R[]xmlCommentNodes;
+	protected CData!R[]cdataNodes;
+	protected XmlPI!R[]xmlPINodes;
 	this() {
 		_docroot = this;
 		// allocate some XmlNodes to kick us off
 		xmlNodes.length = prealloc;
-		XmlNode tmp;
+		XmlNode!R tmp;
 		foreach(ref node;xmlNodes) {
-			tmp = new XmlNode();
+			tmp = new XmlNode!R();
 			tmp._docroot = this;
 			node = tmp;
 		}
@@ -1228,8 +1228,8 @@ class XmlDocument:XmlNode {
 
 
 	/// This static opCall should be used when creating new XmlDocuments for use
-	static XmlDocument opCall(string constring,bool preserveWS = false) {
-		auto root = new XmlDocument;
+	static auto opCall(string constring,bool preserveWS = false) {
+		auto root = new XmlDocument!R;
 		root.parse(constring,preserveWS);
 		return root;
 	}
@@ -1253,60 +1253,60 @@ class XmlDocument:XmlNode {
 	}
 
 	/// Allow usage of the free list and allocation for XmlNodes if necessary.
-	XmlNode allocXmlNode() {
-		XmlNode tmp;
+	auto allocXmlNode() {
+		XmlNode!R tmp;
 		// use already allocated instances if available
 		if (xmlNodes.length) {
 			tmp = xmlNodes[$-1];
 			xmlNodes.length = xmlNodes.length - 1;
 		} else {
 			// otherwise, allocate a new one and set it up properly
-			tmp = new XmlNode();
+			tmp = new XmlNode!R();
 			tmp._docroot = this;
 		}
 		return tmp;
 	}
 
 	/// Allow usage of the free list and allocation for CData nodes if necessary.
-	CData allocCData() {
-		CData tmp;
+	auto allocCData() {
+		CData!R tmp;
 		// use already allocated instances if available
 		if (cdataNodes.length) {
 			tmp = cdataNodes[$-1];
 			cdataNodes.length = cdataNodes.length - 1;
 		} else {
 			// otherwise, allocate a new one and set it up properly
-			tmp = new CData();
+			tmp = new CData!R();
 			tmp._docroot = this;
 		}
 		return tmp;
 	}
 
 	/// Allow usage of the free list and allocation for XmlComments if necessary.
-	XmlComment allocXmlComment() {
-		XmlComment tmp;
+	auto allocXmlComment() {
+		XmlComment!R tmp;
 		// use already allocated instances if available
 		if (xmlCommentNodes.length) {
 			tmp = xmlCommentNodes[$-1];
 			xmlCommentNodes.length = xmlCommentNodes.length - 1;
 		} else {
 			// otherwise, allocate a new one and set it up properly
-			tmp = new XmlComment();
+			tmp = new XmlComment!R();
 			tmp._docroot = this;
 		}
 		return tmp;
 	}
 
 	/// Allow usage of the free list and allocation for XmlPIs if necessary.
-	XmlPI allocXmlPI() {
-		XmlPI tmp;
+	auto allocXmlPI() {
+		XmlPI!R tmp;
 		// use already allocated instances if available
 		if (xmlPINodes.length) {
 			tmp = xmlPINodes[$-1];
 			xmlPINodes.length = xmlPINodes.length - 1;
 		} else {
 			// otherwise, allocate a new one and set it up properly
-			tmp = new XmlPI();
+			tmp = new XmlPI!R();
 			tmp._docroot = this;
 		}
 		return tmp;
@@ -1381,13 +1381,13 @@ private dchar toHVal(char digit) {
 
 unittest {
 	string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
-	XmlNode xml = xmlstring.readDocument();
+	auto xml = xmlstring.readDocument();
 	xmlstring = xml.toString;
 	// ensure that the string doesn't mutate after a second reading, it shouldn't
 	logline("kxml.xml test\n");
 	assert(xmlstring.readDocument().toString == xmlstring);
 	logline("kxml.xml XPath test\n");
-	XmlNode[]searchlist = xml.parseXPath("message/flags");
+	auto searchlist = xml.parseXPath("message/flags");
 	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
 
 	logline("kxml.xml deep XPath test\n");
