@@ -63,6 +63,21 @@ private void logline(string str) {
 	std.stdio.writef("%s", str);
 }
 
+import std.range:isInputRange;
+/* This is UGLY.  This is a combination of hasSlicing and hasLength with out the isNarrowString reliance.
+ * It was necessitated by the fact that this was ported from D1 where narrow strings were all the rage. */
+template isGoodType(R)
+{
+	enum bool isGoodType = is(typeof(
+	{
+		R r = void;
+		auto s = r[1 .. 2];
+		static assert(isInputRange!(typeof(s)));
+		static assert(is(typeof(r.length) : ulong));
+	}));
+}
+
+
 /**
  * Read an entire string into a tree of XmlNodes.
  * This defaults to stripping all whitespace for a speed gain (less objects created), but can be forced to preserve whitespace using the second parameter.
@@ -91,7 +106,8 @@ private void logline(string str) {
  * Returns: An XmlNode with no name that is the root of the document that was read.
  * Throws: XmlError on any parsing errors.
  */
-XmlNode readDocument(string src,bool preserveWS=false)
+XmlNode readDocument(R)(R src, bool preserveWS=false)
+if (isGoodType!R)
 {
 	string pointcpy = src;
 	XmlNode root = new XmlNode(null);
