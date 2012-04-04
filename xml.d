@@ -51,8 +51,8 @@ real atof(string data) {
 	return catof(toStringz(data));
 }
 import std.regex;
-string regrep(string input, string pattern, string delegate(string) translator) {
-	string tmpdel(Captures!(string,size_t) m) {
+R regrep(R)(R input, R pattern, R delegate(R) translator) {
+	R tmpdel(Captures!(R,size_t) m) {
 		return translator(m.hit);
 	}
 	return std.regex.replace!(tmpdel)(input, regex(pattern, "g"));
@@ -109,7 +109,7 @@ template isGoodType(R)
 auto readDocument(R)(R src, bool preserveWS=false)
 if (isGoodType!R)
 {
-	string pointcpy = src;
+	auto pointcpy = src;
 	auto root = new XmlNode!R();
 	try {
 		root.addChildren(src,preserveWS);
@@ -149,8 +149,8 @@ class XPathError : Exception {
 class XmlNode(R=string) if (isGoodType!R)
 {
 	protected XmlDocument!R _docroot;
-	protected string _name;
-	protected string[string] _attributes;
+	protected R _name;
+	protected R[R] _attributes;
 	protected XmlNode!R[]      _children;
 
 
@@ -161,27 +161,27 @@ class XmlNode(R=string) if (isGoodType!R)
 	this(){}
 
 	/// Construct and set the name of this XmlNode.
-	this(string name) {
+	this(R name) {
 		_name = name;
 	}
 
 	/// Get the name of this XmlNode.
-	string getName() {
+	R getName() {
 		return _name;
 	}
 
 	/// Set the name of this XmlNode.
-	void setName(string newName) {
+	void setName(R newName) {
 		_name = newName;
 	}
 
 	/// Does this XmlNode have the specified attribute?
-	bool hasAttribute(string name) {
+	bool hasAttribute(R name) {
 		return (name in _attributes) !is null;
 	}
 
 	/// Get the specified attribute, or return null if the XmlNode doesn't have that attribute.
-	string getAttribute(string name) {
+	R getAttribute(R name) {
 		if (name in _attributes)
 			return xmlDecode(_attributes[name]);
 		else
@@ -189,8 +189,8 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// Return an array of all attributes (does a single pass of XML entity decoding like &quot; -> ").
-	string[string] getAttributes() {
-		string[string]tmp;
+	R[R] getAttributes() {
+		R[R]tmp;
 		// this is inefficient as it is run every time, but doesn't hurt parsing speed
 		foreach(key;_attributes.keys) {
 			tmp[key] = xmlDecode(_attributes[key]);
@@ -200,31 +200,31 @@ class XmlNode(R=string) if (isGoodType!R)
 
 	/// Set an attribute to a string value.
 	/// The attribute is created if it doesn't exist.
-	XmlNode setAttribute(string name, string value) {
+	XmlNode!R setAttribute(R name, R value) {
 		_attributes[name] = xmlEncode(value);
 		return this;
 	}
 
 	/// Set an attribute to an integer value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
-	XmlNode setAttribute(string name, long value) {
-		return setAttribute(name, to!(string)(value));
+	XmlNode!R setAttribute(R name, long value) {
+		return setAttribute(name, to!(R)(value));
 	}
 
 	/// Set an attribute to a float value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
-	XmlNode setAttribute(string name, float value) {
-		return setAttribute(name, to!(string)(value));
+	XmlNode!R setAttribute(R name, float value) {
+		return setAttribute(name, to!(R)(value));
 	}
 
 	/// Remove the attribute with name.
-	XmlNode removeAttribute(string name) {
+	XmlNode!R removeAttribute(R name) {
 		_attributes.remove(name);
 		return this;
 	}
 
 	/// Add a child node.
-	XmlNode addChild(XmlNode newNode) {
+	XmlNode!R addChild(XmlNode!R newNode) {
 		// let's bump things by increments of 10 to make them more efficient
 		if (_children.length+1%10==0) {
 			_children.length = _children.length + 10;
@@ -237,13 +237,13 @@ class XmlNode(R=string) if (isGoodType!R)
 
 	/// Get all child nodes associated with this object.
 	/// Returns: An raw, uncopied array of all child nodes.
-	XmlNode!R[] getChildren() {
+	auto getChildren() {
 		return _children;
 	}
 
 	/// Remove the child with the same reference as what was given.
 	/// Returns: The number of children removed.
-	size_t removeChild(XmlNode remove) {
+	size_t removeChild(XmlNode!R remove) {
 		size_t len = _children.length;
 		for (size_t i = 0;i<_children.length;i++) if (_children[i] is remove) {
 			// we matched it, so remove it
@@ -254,7 +254,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// Add a child Node of cdata (text).
-	XmlNode!R addCData(string cdata) {
+	XmlNode!R addCData(R cdata) {
 		auto cd = (_docroot?_docroot.allocCData:new CData!R);
 		cd.setCData(cdata);
 		addChild(cd);
@@ -280,8 +280,8 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function makes life easier for those looking to pull cdata from a tag, in the case of multiple nodes, it pulls all first level cdata nodes.
-	string getCData() {
-		string tmp;
+	R getCData() {
+		R tmp;
 		foreach(child;_children) if (child.isCData) {
 			tmp ~= child.getCData(); 
 		}
@@ -304,13 +304,13 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function removes all child nodes from the current node
-	XmlNode removeChildren() {
+	auto removeChildren() {
 		_children.length = 0;
 		return this;
 	}
 
 	/// This function sets the cdata inside the current node as intelligently as possible (without allocation, hopefully)
-	XmlNode setCData(string cdata) {
+	XmlNode!R setCData(R cdata) {
 		if (_children.length == 1 && _children[0].isCData) {
 			// since the only node is CData, just set the text and be done
 			_children[0].setCData(cdata);
@@ -322,8 +322,8 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function gives you the inner xml as it would appear in the document.
-	string getInnerXML() {
-		string tmp;
+	auto getInnerXML() {
+		R tmp;
 		foreach(child;_children) {
 			tmp ~= child.toString(); 
 		}
@@ -331,7 +331,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// internal function to generate opening tags
-	string asOpenTag() {
+	R asOpenTag() {
 		if (_name.length == 0) {
 			return null;
 		}
@@ -345,8 +345,8 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// internal function used to generate the attribute list
-	protected string genAttrString() {
-		string ret;
+	protected auto genAttrString() {
+		R ret;
 		foreach (keys,values;_attributes) {
 				ret ~= " " ~ keys ~ "=\"" ~ values ~ "\"";
 		}
@@ -354,7 +354,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// internal function to generate closing tags
-	string asCloseTag() {
+	R asCloseTag() {
 		if (_name.length == 0) {
 			return null;
 		}
@@ -369,7 +369,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function dumps the xml structure to a string with no newlines and no linefeeds to be output.
-	override string toString() {
+	override R toString() {
 		auto tmp = asOpenTag();
 
 		if (_children.length) {
@@ -379,14 +379,9 @@ class XmlNode(R=string) if (isGoodType!R)
 		return tmp;
 	}
 
-	/// This is the old pretty string output function.  It is deprecated in favor of toPrettyString.
-	deprecated string write(string indent=null) {
-		return toPrettyString(indent);
-	}
-
 	/// This function dumps the xml structure in to pretty, tabbed format.
-	string toPrettyString(string indent=null) {
-		string tmp;
+	R toPrettyString(R indent=null) {
+		R tmp;
 		if (getName.length) tmp = indent~asOpenTag()~"\n";
 
 		if (_children.length)
@@ -403,7 +398,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// Add children from a string containing valid xml.
-	void addChildren(string xsrc,bool preserveWS) {
+	void addChildren(R xsrc,bool preserveWS) {
 		while (xsrc.length) {
 			// there may be multiple tag trees or cdata elements
 			parseNode(this,xsrc,preserveWS);
@@ -411,7 +406,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// Add array of nodes directly into this node as children.
-	void addChildren(XmlNode[]newChildren) {
+	void addChildren(XmlNode!R[]newChildren) {
 		// let's bump things by increments of 10 to make them more efficient
 		if (_children.length+newChildren.length%10 < newChildren.length) {
 			_children.length = _children.length + 10;
@@ -422,9 +417,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// snag some text and lob it into a cdata node
-	private void parseCData(XmlNode parent,ref string xsrc,bool preserveWS) {
+	private void parseCData(XmlNode!R parent,ref R xsrc,bool preserveWS) {
 		ptrdiff_t slice;
-		string token;
+		R token;
 		slice = readUntil(xsrc,"<");
 		token = xsrc[0..slice];
 		// don't break xml whitespace specs unless requested
@@ -438,9 +433,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// parse out a close tag and make sure it's the one we want
-	private void parseCloseTag(XmlNode parent,ref string xsrc) {
+	private void parseCloseTag(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
-		string token;
+		R token;
 		slice = readUntil(xsrc,">");
 		token = strip(xsrc[1..slice]);
 		xsrc = xsrc[slice+1..$];
@@ -449,11 +444,11 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// rip off a xml processing instruction, like the ones that come at the beginning of xml documents
-	private void parseXMLPI(XmlNode parent,ref string xsrc) {
+	private void parseXMLPI(XmlNode!R parent,ref R xsrc) {
 		// rip off <?
 		xsrc = stripl(xsrc[1..$]);
 		// rip off name
-		string name = getWSToken(xsrc);
+		R name = getWSToken(xsrc);
 		XmlPI!R newnode;
 		if (name[$-1] == '?') {
 			// and we're at the end of the element
@@ -478,9 +473,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// rip off an unparsed character data node
-	private void parseUCData(XmlNode parent,ref string xsrc) {
+	private void parseUCData(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
-		string token;
+		R token;
 		xsrc = xsrc[7..$];
 		slice = readUntil(xsrc,"]]>");
 		token = xsrc[0..slice];
@@ -493,9 +488,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// rip off a comment
-	private void parseComment(XmlNode parent,ref string xsrc) {
+	private void parseComment(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
-		string token;
+		R token;
 		xsrc = xsrc[2..$];
 		slice = readUntil(xsrc,"-->");
 		token = xsrc[0..slice];
@@ -506,9 +501,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// rip off a XML Instruction
-	private void parseXMLInst(XmlNode parent,ref string xsrc) {
+	private void parseXMLInst(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
-		string token;
+		R token;
 		slice = readUntil(xsrc,">");
 		slice += ">".length;
 		if (slice>xsrc.length) slice = xsrc.length;
@@ -518,9 +513,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// rip off a XML opening tag
-	private void parseOpenTag(XmlNode parent,ref string xsrc,bool preserveWS) {
+	private void parseOpenTag(XmlNode!R parent,ref R xsrc,bool preserveWS) {
 		// rip off name
-		string name = getWSToken(xsrc);
+		R name = getWSToken(xsrc);
 		// rip off attributes while looking for ?>
 		debug(xml)logline("Got a "~name~" open tag\n");
 		auto newnode = (_docroot?_docroot.allocXmlNode:new XmlNode!R);
@@ -559,7 +554,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// returns everything after the first node TREE (a node can be text as well)
-	private int parseNode(XmlNode parent,ref string xsrc,bool preserveWS) {
+	private int parseNode(XmlNode!R parent,ref R xsrc,bool preserveWS) {
 		// if it was just whitespace and no more text or tags, make sure that's covered
 		int ret = 0;
 		// this has been removed from normal code flow to be XML std compliant, preserve whitespace
@@ -568,7 +563,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		if (!xsrc.length) {
 			return 0;
 		}
-		string token;
+		R token;
 		if (xsrc[0] != '<') {
 			parseCData(parent,xsrc,preserveWS);
 			return 0;
@@ -610,7 +605,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// read data until the delimiter is found, return the index where the delimiter starts
-	private ptrdiff_t readUntil(string xsrc, string delim) {
+	private ptrdiff_t readUntil(R xsrc, R delim) {
 		// the -delim.length is partially optimization and partially avoiding jumping the array bounds
 		ptrdiff_t i = xsrc.find(delim);
 		// yeah...if we didn't find it, then the whole string is the token :D
@@ -621,7 +616,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// basically to get the name off of open tags
-	private string getWSToken(ref string input) {
+	private R getWSToken(ref R input) {
 		input = stripl(input);
 		int i;
 		for(i=0;i<input.length && !isspace(input[i]) && input[i] != '>' && input[i] != '/' && input[i] != '<' && input[i] != '=' && input[i] != '!';i++){}
@@ -634,15 +629,15 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// this code is now officially prettified
-	private void parseAttribute (XmlNode xml,ref string attrstr,string term = null) {
-		string ripName(ref string input) {
+	private void parseAttribute (XmlNode!R xml,ref R attrstr,R term = null) {
+		auto ripName(ref R input) {
 			int i;
 			for(i=0;i < input.length && !isspace(input[i]) && input[i] != '=';i++){}
 			auto ret = input[0..i];
 			input = input[i..$];
 			return ret;
 		}
-		string ripValue(ref string input) {
+		auto ripValue(ref R input) {
 		        int x;
 			char quot = input[0];
 			// rip off the starting quote
@@ -650,14 +645,14 @@ class XmlNode(R=string) if (isGoodType!R)
 			// find the end of the string we want
 		        for(x = 0;input[x] != quot && x < input.length;x++) {
 		        }
-		        string tmp = input[0..x];
+		        auto tmp = input[0..x];
 			// add one to leave off the quote
 		        input = input[x+1..$];
 		        return tmp;
 		}
 
 		// snag the name from the attribute string
-		string value,name = ripName(attrstr);
+		R value,name = ripName(attrstr);
 		attrstr = stripl(attrstr);
 		// check for = to make sure the attribute string is kosher
 		if (!attrstr.length) throw new XmlError("Unexpected end of attribute string near "~name);
@@ -681,13 +676,13 @@ class XmlNode(R=string) if (isGoodType!R)
 
 	/// Do an XPath search on this node and return all matching nodes.
 	/// This function does not perform any modifications to the tree and so does not support XML mutation.
-	XmlNode[]parseXPath(string xpath,bool caseSensitive = false) {
+	XmlNode!R[] parseXPath(R xpath,bool caseSensitive = false) {
 		// rip off the leading / if it's there and we're not looking for a deep path
 		if (!isDeepPath(xpath) && xpath.length && xpath[0] == '/') xpath = xpath[1..$];
 		debug(xpath)logline("Got xpath "~xpath~" in node "~getName~"\n");
-		string truncxpath;
+		R truncxpath;
 		auto nextnode = getNextNode(xpath,truncxpath);
-		string attrmatch;
+		R attrmatch;
 		// XXX need to be able to split the attribute match off even when it doesn't have [] around it
 		ptrdiff_t offset = nextnode.find("[");
 		if (offset != -1) {
@@ -720,7 +715,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		return retarr;
 	}
 
-	private bool matchXPathPredicate(string attrstr,bool caseSen) {
+	private bool matchXPathPredicate(R attrstr,bool caseSen) {
 		debug(xpath)logline("matching attribute string "~attrstr~"\n");
 		// strip off the encasing [] if it exists
 		if (!attrstr.length) {
@@ -733,7 +728,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			throw new XPathError("got malformed attribute match "~attrstr~"\n");
 		}
 		// rip apart the xpath predicate assuming it's node and attribute matches
-		string[]attrlist;
+		R[]attrlist;
 		// basically, we're splitting on " and " and " or ", but while respecting []
 		int bcount = 0;
 		ptrdiff_t lslice = 0;
@@ -771,7 +766,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			// there should be NO zero-length strings this far in
 			if (attr[0] == '@') {
 				attr = attr[1..$];
-				string comparator;
+				R comparator;
 				auto attrname = getWSToken(attr);
 				bool verbatim = false;
 				attr = stripl(attr);
@@ -844,13 +839,13 @@ class XmlNode(R=string) if (isGoodType!R)
 		bool[]ordTerms;
 		ordTerms.length = numOrdTerms + 1;
 		ordTerms[0] = res[0];
-		debug(xpath)logline("res[0]="~to!(string)(res[0])~"\n");
+		debug(xpath)logline("res[0]="~to!(R)(res[0])~"\n");
 		numOrdTerms = 0; // we're using this as current position, now
 		foreach (i,attr;attrlist) if (i%2) {
 			if (attr == "and") {
-				debug(xpath)logline("combining anded terms on ord term "~to!(string)(numOrdTerms)~" and i="~to!(string)(i)~" with res.length="~to!(string)(res.length)~" and attrlist.length="~to!(string)(attrlist.length)~"\n");
+				debug(xpath)logline("combining anded terms on ord term "~to!(R)(numOrdTerms)~" and i="~to!(R)(i)~" with res.length="~to!(R)(res.length)~" and attrlist.length="~to!(R)(attrlist.length)~"\n");
 				ordTerms[numOrdTerms] &= res[i+1];
-				debug(xpath)logline("res["~to!(string)(i+1)~"]="~to!(string)(res[i+1])~"\n");
+				debug(xpath)logline("res["~to!(R)(i+1)~"]="~to!(R)(res[i+1])~"\n");
 			} else if (attr == "or") {
 				numOrdTerms++;
 				ordTerms[numOrdTerms] = res[i+1];
@@ -861,11 +856,11 @@ class XmlNode(R=string) if (isGoodType!R)
 		// now that results have been determined, map them to a final result using "and" and "or"
 		bool ret = false;
 		foreach (val;ordTerms) ret |= val;
-		debug(xpath)logline("Ended up with "~to!(string)(ret)~"\n");
+		debug(xpath)logline("Ended up with "~to!(R)(ret)~"\n");
 		return ret;
 	}
 	
-	private bool isDeepPath(string xpath) {
+	private bool isDeepPath(R xpath) {
 		// check to see if we're currently searching a deep path
 		if (xpath.length > 1 && xpath[0] == '/' && xpath[1] == '/') {
 			return true;
@@ -874,7 +869,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// this does not modify the incoming string, only pulls a slice out of it
-	private string getNextNode(string xpath,out string truncxpath) {
+	private auto getNextNode(R xpath,out R truncxpath) {
 		if (isDeepPath(xpath)) xpath = xpath[2..$];
 		// dig through the pile of xpath, but make sure to respect attribute matches properly
 		int contexts = 0;
@@ -893,23 +888,23 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// Index override for getting attributes.
-	string opIndex(string attr) {
+	auto opIndex(R attr) {
 		return getAttribute(attr);
 	}
 
 	/// Index override for getting children.
-	XmlNode opIndex(int childnum) {
+	auto opIndex(int childnum) {
 		if (childnum < _children.length) return _children[childnum];
 		return null;
 	}
 
 	/// Index override for setting attributes.
-	XmlNode opIndexAssign(string value,string name) {
+	auto opIndexAssign(R value, R name) {
 		return setAttribute(name,value);
 	}
 
 	/// Index override for replacing children.
-	XmlNode opIndexAssign(XmlNode x,int childnum) {
+	auto opIndexAssign(XmlNode!R x,int childnum) {
 		if (childnum > _children.length) throw new Exception("Child element assignment is outside of array bounds");
 		_children[childnum] = x;
 		return this;
@@ -919,10 +914,10 @@ class XmlNode(R=string) if (isGoodType!R)
 /// A class specialization for CData nodes.
 class CData(R=string) : XmlNode!(R)
 {
-	private string _cdata;
+	private R _cdata;
 
 	/// Override the string constructor, assuming the data is coming from a user program, possibly with unescaped XML entities that need escaping.
-	this(string cdata) {
+	this(R cdata) {
 		setCData(cdata);
 	}
 
@@ -930,12 +925,12 @@ class CData(R=string) : XmlNode!(R)
 
 	/// Get CData string associated with this object.
 	/// Returns: Parsed Character Data with decoded XML entities
-	override string getCData() {
+	override R getCData() {
 		return xmlDecode(_cdata);
 	}
 
 	/// This function assumes data is coming from user input, possibly with unescaped XML entities that need escaping.
-	override CData setCData(string cdata) {
+	override CData!R setCData(R cdata) {
 		_cdata = xmlEncode(cdata);
 		return this;
 	}
@@ -951,59 +946,54 @@ class CData(R=string) : XmlNode!(R)
 	}
 
 	/// This outputs escaped XML entities for use on the network or in a document.
-	protected override string toString() {
+	protected override R toString() {
 		return _cdata;
 	}
 
-	/// Deprecated pretty writer
-	deprecated protected override string write(string indent=null) {
-		return toPrettyString(indent);
-	}
-
 	/// This outputs escaped XML entities for use on the network or in a document in pretty, tabbed format.
-	protected override string toPrettyString(string indent=null) {
+	protected override R toPrettyString(R indent=null) {
 		return indent~toString()~"\n";
 	}
 
-	override string asCloseTag() { return null; }
+	override R asCloseTag() { return null; }
 
 	/// This throws an exception because CData nodes do not have names.
-	override string getName() {
+	override R getName() {
 		throw new XmlError("CData nodes do not have names to get.");
 	}
 
 	/// This throws an exception because CData nodes do not have names.
-	override void setName(string newName) {
+	override void setName(R newName) {
 		throw new XmlError("CData nodes do not have names to set.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override bool hasAttribute(string name) {
+	override bool hasAttribute(R name) {
 		throw new XmlError("CData nodes do not have attributes.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override string getAttribute(string name) {
+	override R getAttribute(R name) {
 		throw new XmlError("CData nodes do not have attributes to get.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override string[string] getAttributes() {
+	override R[R] getAttributes() {
 		throw new XmlError("CData nodes do not have attributes to get.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override XmlNode!R setAttribute(string name, string value) {
+	override XmlNode!R setAttribute(R name, R value) {
 		throw new XmlError("CData nodes do not have attributes to set.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override XmlNode!R setAttribute(string name, long value) {
+	override XmlNode!R setAttribute(R name, long value) {
 		throw new XmlError("CData nodes do not have attributes to set.");
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override XmlNode!R setAttribute(string name, float value) {
+	override XmlNode!R setAttribute(R name, float value) {
 		throw new XmlError("CData nodes do not have attributes to set.");
 	}
 
@@ -1013,7 +1003,7 @@ class CData(R=string) : XmlNode!(R)
 	}
 
 	/// This throws an exception because CData nodes do not have children.
-	override XmlNode!R addCData(string cdata) {
+	override XmlNode!R addCData(R cdata) {
 		throw new XmlError("Cannot add a child node to CData.");
 	}
 }
@@ -1023,18 +1013,18 @@ class XmlPI(R=string) : XmlNode!R {
 	this(){}
 
 	/// Override the constructor that takes a name so that it's accessible.
-	this(string name) {
+	this(R name) {
 		super(name);
 	}
 
 	/// This node can't have children, and so can't have CData.
 	/// Should this throw an exception?
-	override string getCData() {
+	override R getCData() {
 		return null;
 	}
 
 	/// Override toString for output to be used by parsers.
-	override string toString() {
+	override R toString() {
 		return asOpenTag();
 	}
 
@@ -1049,18 +1039,13 @@ class XmlPI(R=string) : XmlNode!R {
 		}
 	}
 
-	/// Deprecated pretty print to be used by parsers.
-	deprecated protected override string write(string indent=null) {
-		return toPrettyString(indent);
-	}
-
 	/// Pretty print to be used by parsers.
-	protected override string toPrettyString(string indent=null) {
+	protected override R toPrettyString(R indent=null) {
 		return indent~asOpenTag()~"\n";
 	}
 
 	// internal function to generate opening tags
-	override string asOpenTag() {
+	override R asOpenTag() {
 		if (_name.length == 0) {
 			return null;
 		}
@@ -1069,7 +1054,7 @@ class XmlPI(R=string) : XmlNode!R {
 	}
 
 	// internal function to generate closing tags
-	override string asCloseTag() { return null; }
+	override R asCloseTag() { return null; }
 
 	/// You can't add a child to something that can't have children.  There is no adoption in XML world.
 	override XmlNode!R addChild(XmlNode!R newNode) {
@@ -1078,23 +1063,23 @@ class XmlPI(R=string) : XmlNode!R {
 
 	/// You can't add a child to something that can't have children.  There is no adoption in XML world.
 	/// Especially for red-headed stepchildren CData nodes.
-	override XmlNode!R addCData(string cdata) {
+	override XmlNode!R addCData(R cdata) {
 		throw new XmlError("Cannot add a child node to XmlPI.");
 	}
 }
 
 /// A class specialization for XML comments.
 class XmlComment(R=string) : XmlNode!R {
-	string _comment;
+	R _comment;
 	this(){}
-	this(string comment) {
+	this(R comment) {
 		_comment = comment;
 		super(null);
 	}
 
 	/// This node can't have children, and so can't have CData.
 	/// Should this throw an exception?
-	override string getCData() {
+	override R getCData() {
 		return null;
 	}
 
@@ -1109,22 +1094,17 @@ class XmlComment(R=string) : XmlNode!R {
 	}
 
 	/// Override toString for output to be used by parsers.
-	override string toString() {
+	override R toString() {
 		return asOpenTag();
 	}
 
-	/// Deprecated pretty print to be used by parsers.
-	deprecated protected override string write(string indent=null) {
-		return toPrettyString(indent);
-	}
-
 	/// Pretty print to be used by parsers.
-	protected override string toPrettyString(string indent=null) {
+	protected override R toPrettyString(R indent=null) {
 		return indent~asOpenTag()~"\n";
 	}
 
 	// internal function to generate opening tags
-	protected override string asOpenTag() {
+	protected override R asOpenTag() {
 		if (_name.length == 0) {
 			return null;
 		}
@@ -1133,45 +1113,45 @@ class XmlComment(R=string) : XmlNode!R {
 	}
 
 	// internal function to generate closing tags
-	override string asCloseTag() { return null; }
+	override R asCloseTag() { return null; }
 
 	/// The members of Project Mayhem have no name... (this throws an exception)
-	override string getName() {
+	override R getName() {
 		throw new XmlError("Comment nodes do not have names to get.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override void setName(string newName) {
+	override void setName(R newName) {
 		throw new XmlError("Comment nodes do not have names to set.");
 	}
 
 	/// These events can not be attributed to space monkeys. (this throws an exception)
-	override bool hasAttribute(string name) {
+	override bool hasAttribute(R name) {
 		throw new XmlError("Comment nodes do not have attributes.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override string getAttribute(string name) {
+	override R getAttribute(R name) {
 		throw new XmlError("Comment nodes do not have attributes to get.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override string[string] getAttributes() {
+	override R[R] getAttributes() {
 		throw new XmlError("Comment nodes do not have attributes to get.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode!R setAttribute(string name, string value) {
+	override XmlNode!R setAttribute(R name, R value) {
 		throw new XmlError("Comment nodes do not have attributes to set.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode!R setAttribute(string name, long value) {
+	override XmlNode!R setAttribute(R name, long value) {
 		throw new XmlError("Comment nodes do not have attributes to set.");
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode!R setAttribute(string name, float value) {
+	override XmlNode!R setAttribute(R name, float value) {
 		throw new XmlError("Comment nodes do not have attributes to set.");
 	}
 
@@ -1181,7 +1161,7 @@ class XmlComment(R=string) : XmlNode!R {
 	}
 
 	/// Ditto. (this throws an exception)
-	override XmlNode!R addCData(string cdata) {
+	override XmlNode!R addCData(R cdata) {
 		throw new XmlError("Cannot add a child node to comment.");
 	}
 }
@@ -1228,7 +1208,7 @@ class XmlDocument(R=string) : XmlNode!R {
 
 
 	/// This static opCall should be used when creating new XmlDocuments for use
-	static auto opCall(string constring,bool preserveWS = false) {
+	static auto opCall(R constring,bool preserveWS = false) {
 		auto root = new XmlDocument!R;
 		root.parse(constring,preserveWS);
 		return root;
@@ -1242,8 +1222,8 @@ class XmlDocument(R=string) : XmlNode!R {
 		_children.length = 0;
 	}
 
-	void parse(string constring,bool preserveWS = false) {
-		string pointcpy = constring;
+	void parse(R constring,bool preserveWS = false) {
+		auto pointcpy = constring;
 		try {
 			addChildren(constring,preserveWS);
 		} catch (XmlError e) {
@@ -1315,7 +1295,7 @@ class XmlDocument(R=string) : XmlNode!R {
 
 
 /// Encode characters such as &, <, >, etc. as their xml/html equivalents
-string xmlEncode(string src) {
+auto xmlEncode(R)(R src) {
         src = replace(src, "&", "&amp;");
         src = replace(src, "<", "&lt;");
         src = replace(src, ">", "&gt;");
@@ -1325,38 +1305,38 @@ string xmlEncode(string src) {
 }
 
 /// Convert xml-encoded special characters such as &amp;amp; back to &amp;.
-string xmlDecode(string src) {
+auto xmlDecode(R)(R src) {
         src = replace(src    , "&lt;",  "<");
         src = replace(src, "&gt;",  ">");
         src = replace(src, "&apos;", "'");
         src = replace(src, "&quot;",  "\"");
 	// take care of decimal character entities
-	src = regrep(src,"&#\\d{1,8};",(string m) {
+	src = regrep(src,"&#\\d{1,8};",(R m) {
 		auto cnum = m[2..$-1];
 		dchar dnum = cast(dchar)to!(int)(cnum);
-		return quickUTF8(dnum);
+		return quickUTF8!R(dnum);
 	});
 	// take care of hex character entities
-	src = regrep(src,"&#[xX][0-9a-fA-F]{1,8};",(string m) {
+	src = regrep(src,"&#[xX][0-9a-fA-F]{1,8};",(R m) {
 		auto cnum = m[3..$-1];
 		dchar dnum = hex2dchar(cnum);
-		return quickUTF8(dnum);
+		return quickUTF8!R(dnum);
 	});
         src = replace(src, "&amp;", "&");
         return src;
 }
 
 // a quick dchar to utf8 conversion
-private string quickUTF8(dchar dachar) {
+private auto quickUTF8(R)(dchar dachar) {
 	char[]ret;
 	foreach(char r;[dachar]) {
 		ret ~= r;
 	}
-	return cast(string)ret;
+	return cast(R)ret;
 }
 
 // convert a hex string to a raw dchar
-private dchar hex2dchar (string hex) {
+private dchar hex2dchar(R)(R hex) {
 	dchar res = 0;
 	foreach(digit;hex) {
 		res <<= 4;
