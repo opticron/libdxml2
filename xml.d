@@ -912,7 +912,7 @@ class XmlNode(R=string) if (isGoodType!R)
 }
 
 /// A class specialization for CData nodes.
-class CData(R=string) : XmlNode!(R)
+class CData(R=string) : XmlNode!R
 {
 	private R _cdata;
 
