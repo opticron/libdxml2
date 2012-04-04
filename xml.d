@@ -72,6 +72,7 @@ template isGoodType(R)
 	{
 		R r = void;
 		auto s = r[1 .. 2];
+		auto t = s ~ r;
 		static assert(isInputRange!(typeof(s)));
 		static assert(is(typeof(r.length) : ulong));
 	}));
