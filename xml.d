@@ -86,10 +86,10 @@ template isGoodType(R)
  * --------------------------------
  * string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\"><flags>triggered</flags><flags>targeted</flags></message>";
  * XmlNode xml = xmlstring.readDocument();
- * xmlstring = xml.toString;
+ * xmlstring = xml.toXml;
  * // ensure that the string doesn't mutate after a second reading, it shouldn't
  * debug(xml)logline("kxml.xml unit test\n");
- * assert(xmlstring.readDocument().toString == xmlstring);
+ * assert(xmlstring.readDocument().toXml == xmlstring);
  * debug(xpath)logline("kxml.xml XPath unit test\n");
  * XmlNode[]searchlist = xml.parseXPath("message/flags");
  * assert(searchlist.length == 2 && searchlist[0].getName == "flags");
@@ -326,7 +326,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	auto getInnerXML() {
 		R tmp;
 		foreach(child;_children) {
-			tmp ~= child.toString(); 
+			tmp ~= child.toXml(); 
 		}
 		return tmp;
 	}
@@ -370,7 +370,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function dumps the xml structure to a string with no newlines and no linefeeds to be output.
-	override R toString() {
+	R toXml() {
 		auto tmp = asOpenTag();
 
 		if (_children.length) {
@@ -381,7 +381,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function dumps the xml structure in to pretty, tabbed format.
-	R toPrettyString(R indent=null) {
+	R toPrettyXml(R indent = cast(R)"") {
 		R tmp;
 		if (getName.length) tmp = indent~asOpenTag()~"\n";
 
@@ -390,7 +390,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			for (int i = 0; i < _children.length; i++)
 			{
 				// these guys are supposed to do their own indentation
-				tmp ~= _children[i].toPrettyString(indent~(getName.length?"	":"")); 
+				tmp ~= _children[i].toPrettyXml(indent~(getName.length?"	":"")); 
 			}
 			if (getName.length) tmp ~= indent~asCloseTag()~"\n";
 		}
@@ -630,7 +630,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	// this code is now officially prettified
-	private void parseAttribute (XmlNode!R xml,ref R attrstr,R term = null) {
+	private void parseAttribute (XmlNode!R xml,ref R attrstr) {
 		auto ripName(ref R input) {
 			int i;
 			for(i=0;i < input.length && !isspace(input[i]) && input[i] != '=';i++){}
@@ -947,13 +947,13 @@ class CData(R=string) : XmlNode!R
 	}
 
 	/// This outputs escaped XML entities for use on the network or in a document.
-	protected override R toString() {
+	protected override R toXml() {
 		return _cdata;
 	}
 
 	/// This outputs escaped XML entities for use on the network or in a document in pretty, tabbed format.
-	protected override R toPrettyString(R indent=null) {
-		return indent~toString()~"\n";
+	protected override R toPrettyXml(R indent = cast(R)"") {
+		return indent~toXml()~"\n";
 	}
 
 	override R asCloseTag() { return null; }
@@ -1024,8 +1024,8 @@ class XmlPI(R=string) : XmlNode!R {
 		return null;
 	}
 
-	/// Override toString for output to be used by parsers.
-	override R toString() {
+	/// Override toXml for output to be used by parsers.
+	override R toXml() {
 		return asOpenTag();
 	}
 
@@ -1041,7 +1041,7 @@ class XmlPI(R=string) : XmlNode!R {
 	}
 
 	/// Pretty print to be used by parsers.
-	protected override R toPrettyString(R indent=null) {
+	protected override R toPrettyXml(R indent = cast(R)"") {
 		return indent~asOpenTag()~"\n";
 	}
 
@@ -1075,13 +1075,13 @@ class XmlComment(R=string) : XmlNode!R {
 	this(){}
 	this(R comment) {
 		_comment = comment;
-		super(null);
+		super(cast(R)null);
 	}
 
 	/// This node can't have children, and so can't have CData.
 	/// Should this throw an exception?
 	override R getCData() {
-		return null;
+		return cast(R)null;
 	}
 
 	/// This function resets the node to a default state
@@ -1094,27 +1094,27 @@ class XmlComment(R=string) : XmlNode!R {
 		}
 	}
 
-	/// Override toString for output to be used by parsers.
-	override R toString() {
+	/// Override toXml for output to be used by parsers.
+	override R toXml() {
 		return asOpenTag();
 	}
 
 	/// Pretty print to be used by parsers.
-	protected override R toPrettyString(R indent=null) {
-		return indent~asOpenTag()~"\n";
+	protected override R toPrettyXml(R indent = cast(R)"") {
+		return indent~asOpenTag()~cast(R)"\n";
 	}
 
 	// internal function to generate opening tags
 	protected override R asOpenTag() {
 		if (_name.length == 0) {
-			return null;
+			return cast(R)null;
 		}
-		auto s = "<!--" ~ _comment  ~ "-->";
+		auto s = cast(R)"<!--" ~ _comment  ~ cast(R)"-->";
 		return s;
 	}
 
 	// internal function to generate closing tags
-	override R asCloseTag() { return null; }
+	override R asCloseTag() { return cast(R)null; }
 
 	/// The members of Project Mayhem have no name... (this throws an exception)
 	override R getName() {
@@ -1189,7 +1189,7 @@ class XmlComment(R=string) : XmlNode!R {
   */
 public int prealloc = 50;
 class XmlDocument(R=string) : XmlNode!R {
-	// this should inherit the reset and toString that we want
+	// this should inherit the reset and toXml that we want
 	protected XmlNode!R[]xmlNodes;
 	protected XmlComment!R[]xmlCommentNodes;
 	protected CData!R[]cdataNodes;
@@ -1228,7 +1228,7 @@ class XmlDocument(R=string) : XmlNode!R {
 		try {
 			addChildren(constring,preserveWS);
 		} catch (XmlError e) {
-			logline("Caught exception from input string:\n"~pointcpy~"\n");
+			logline("Caught exception from input string:\n"~cast(string)pointcpy~"\n");
 			throw e;
 		}
 	}
@@ -1307,13 +1307,13 @@ auto xmlEncode(R)(R src) {
 
 /// Convert xml-encoded special characters such as &amp;amp; back to &amp;.
 auto xmlDecode(R)(R src) {
-        src = replace(src    , "&lt;",  "<");
+        src = replace(src, "&lt;",  "<");
         src = replace(src, "&gt;",  ">");
         src = replace(src, "&apos;", "'");
         src = replace(src, "&quot;",  "\"");
 	// take care of decimal character entities
 	src = regrep(src,"&#\\d{1,8};",(R m) {
-		auto cnum = m[2..$-1];
+		auto cnum = m[2..m.length-1];
 		dchar dnum = cast(dchar)to!(int)(cnum);
 		return quickUTF8!R(dnum);
 	});
@@ -1363,10 +1363,10 @@ private dchar toHVal(char digit) {
 unittest {
 	string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
 	auto xml = xmlstring.readDocument();
-	xmlstring = xml.toString;
+	xmlstring = xml.toXml;
 	// ensure that the string doesn't mutate after a second reading, it shouldn't
 	logline("kxml.xml test\n");
-	assert(xmlstring.readDocument().toString == xmlstring);
+	assert(xmlstring.readDocument().toXml == xmlstring);
 	logline("kxml.xml XPath test\n");
 	auto searchlist = xml.parseXPath("message/flags");
 	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
@@ -1404,6 +1404,48 @@ unittest {
 	/*logline("kxml.xml XPath subnote match test\n");
 	searchlist = xml.parseXPath("/message[flags@tweak]");
 	assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
+
+	struct custring {
+		string data;
+		this(string assgn) {data = assgn;}
+		//void opAssign(void* takenulls) {}
+		void opAssign(string assgn) {data = assgn;}
+		void opAssign(custring assgn) {data = assgn.data;}
+		string opCast(string)() {return data;}
+		custring opBinary(string op)(custring b) {
+			static if (op == "~") {
+				custring concat;
+				concat.data = data~b.data;
+				return concat;
+			} else static assert(0, "Operator "~op~" not implemented");
+		}
+		@property {
+			size_t length() const {return data.length;}
+			void length(size_t len) {data.length = len;}
+		}
+		bool opEquals(custring b) {return data == b.data;}
+		char opIndex(size_t index) {return data[index];}
+		custring opIndex() {
+			custring n;
+			n.data = data;
+			return n;
+		}
+		custring opSlice(size_t a, size_t b) {
+			custring n;
+			n.data = data[a..b];
+			return n;
+		}
+		bool empty() const {return !data.length;}
+		char front() const {return data[0];}
+		void popFront() {data = data[1..$];}
+	}
+	custring xmlcustring = null;
+	xmlcustring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
+	//auto xmlcu = readDocument(xmlcustring);
+	//xmlcustring = xmlcu.toXml;
+	// ensure that the string doesn't mutate after a second reading, it shouldn't
+	//logline("custring kxml.xml test\n");
+	//assert(readDocument(xmlcustring).toXml == xmlcustring);
 }
 
 version(XML_main) {
