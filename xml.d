@@ -42,7 +42,7 @@
 
 module kxml.xml;
 import std.conv:to;
-import std.string:strip,stripr=stripRight,stripl=stripLeft,split,replace,find=indexOf,cmp,icmp,isNumeric,toStringz;
+import std.string:split,replace,isNumeric,toStringz;
 import core.stdc.stdlib:catof=atof;
 import std.ascii:isspace=isWhite;
 import core.stdc.stdio:printf;
@@ -63,7 +63,76 @@ private void logline(string str) {
 	std.stdio.writef("%s", str);
 }
 
-import std.range:isInputRange;
+import core.exception:RangeError;
+import std.range:isInputRange,empty,front,popFront;
+import std.uni:isWhite,toLower;
+
+/* custom version of strip that uses the below */
+R strip(R)(R tostrip) {
+	return stripLeft(stripRight(tostrip));
+}
+/* custom version of stripLeft that relies only on isInputRange capabilities */
+R stripLeft(R)(R tostrip) if (isInputRange!R) {
+	while (!tostrip.empty && isWhite(tostrip.front)) {
+		tostrip.popFront();
+	}
+	return tostrip;
+}
+/* I've already guaranteed that R has length and has slicing by "virtue" of using isGoodType below,
+ * so here is a version of stripRight that relies only on slicing and length 
+ *
+ * this is gross for anything that's not an array */
+R stripRight(R)(R tostrip) {
+	while(tostrip.length && isWhite(tostrip[tostrip.length-1])) {
+		tostrip = tostrip[0..tostrip.length-1];
+	}
+	return tostrip;
+}
+/* custom icmp using generic cmp w/ predicate */
+import std.algorithm:cmp;
+int doCompare(C)(C a, C b) {return toLower(cast(dchar)a) < toLower(cast(dchar)b);}
+int icmp(R)(R s1, R s2) {
+	return cmp!(doCompare,R,R)(s1,s2);
+}
+
+R find(R)(R haystack, R needle) {
+	if (needle.empty()) {
+		return needle;
+	}
+	// find beginning of needle
+	while(!haystack.empty()) {
+		if (haystack.front == needle.front) {
+			R nhaystack = haystack;
+			R nneedle = needle;
+			// walk it down
+			while(!nhaystack.empty() && !nneedle.empty()) {
+				if (nhaystack.front == nneedle.front) {
+					nhaystack.popFront();
+					nneedle.popFront();
+				} else {
+					// this is not the needle we're looking for
+					break;
+				}
+			}
+			// check exit conditions
+			if (nhaystack.empty() && !nneedle.empty()) {
+				// ran out of characters before finding the needle, done searching
+				// return empty since the needle did not exist in the haystack
+				return nhaystack;
+			}
+			// if needle is empty, success!
+			if (nneedle.empty()) {
+				return haystack;
+			}
+			// if both still have elements, did not find match on this attempt, continue on
+		}
+		haystack.popFront();
+	}
+	// if this was going to succeed, it would have by now
+	// return empty range
+	return haystack;
+}
+
 /* This is UGLY.  This is a combination of hasSlicing and hasLength with out the isNarrowString reliance.
  * It was necessitated by the fact that this was ported from D1 where narrow strings were all the rage. */
 template isGoodType(R)
@@ -115,7 +184,7 @@ if (isGoodType!R)
 	try {
 		root.addChildren(src,preserveWS);
 	} catch (XmlError e) {
-		logline("Caught exception from input string:\n"~pointcpy~"\n");
+		logline("Caught exception from input string:\n"~cast(string)pointcpy~"\n");
 		throw e;
 	}
 	return root;
@@ -183,10 +252,11 @@ class XmlNode(R=string) if (isGoodType!R)
 
 	/// Get the specified attribute, or return null if the XmlNode doesn't have that attribute.
 	R getAttribute(R name) {
-		if (name in _attributes)
+		if (name in _attributes) {
 			return xmlDecode(_attributes[name]);
-		else
-			return null;
+		} else {
+			return cast(R)"";
+		}
 	}
 
 	/// Return an array of all attributes (does a single pass of XML entity decoding like &quot; -> ").
@@ -209,13 +279,13 @@ class XmlNode(R=string) if (isGoodType!R)
 	/// Set an attribute to an integer value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
 	XmlNode!R setAttribute(R name, long value) {
-		return setAttribute(name, to!(R)(value));
+		return setAttribute(name, cast(R)to!(string)(value));
 	}
 
 	/// Set an attribute to a float value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
 	XmlNode!R setAttribute(R name, float value) {
-		return setAttribute(name, to!(R)(value));
+		return setAttribute(name, cast(R)to!(string)(value));
 	}
 
 	/// Remove the attribute with name.
@@ -334,13 +404,13 @@ class XmlNode(R=string) if (isGoodType!R)
 	// internal function to generate opening tags
 	R asOpenTag() {
 		if (_name.length == 0) {
-			return null;
+			return cast(R)"";
 		}
-		auto s = "<" ~ _name ~ genAttrString();
+		auto s = cast(R)"<" ~ _name ~ genAttrString();
 
 		if (_children.length == 0)
-			s ~= " /"; // We want <blah /> if the node has no children.
-		s ~= ">";
+			s ~= cast(R)" /"; // We want <blah /> if the node has no children.
+		s ~= cast(R)">";
 
 		return s;
 	}
@@ -349,7 +419,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	protected auto genAttrString() {
 		R ret;
 		foreach (keys,values;_attributes) {
-				ret ~= " " ~ keys ~ "=\"" ~ values ~ "\"";
+				ret ~= cast(R)" " ~ keys ~ cast(R)"=\"" ~ values ~ cast(R)"\"";
 		}
 		return ret;
 	}
@@ -357,12 +427,13 @@ class XmlNode(R=string) if (isGoodType!R)
 	// internal function to generate closing tags
 	R asCloseTag() {
 		if (_name.length == 0) {
-			return null;
+			return cast(R)"";
 		}
-		if (_children.length != 0)
-			return "</" ~ _name ~ ">";
-		else
-			return null; // don't need it.  Leaves close themselves via the <blah /> syntax.
+		if (_children.length != 0) {
+			return cast(R)"</" ~ _name ~ cast(R)">";
+		} else {
+			return cast(R)""; // don't need it.  Leaves close themselves via the <blah /> syntax.
+		}
 	}
 
 	final protected bool isLeaf() {
@@ -383,16 +454,16 @@ class XmlNode(R=string) if (isGoodType!R)
 	/// This function dumps the xml structure in to pretty, tabbed format.
 	R toPrettyXml(R indent = cast(R)"") {
 		R tmp;
-		if (getName.length) tmp = indent~asOpenTag()~"\n";
+		if (getName.length) tmp = indent~asOpenTag()~cast(R)"\n";
 
 		if (_children.length)
 		{
 			for (int i = 0; i < _children.length; i++)
 			{
 				// these guys are supposed to do their own indentation
-				tmp ~= _children[i].toPrettyXml(indent~(getName.length?"	":"")); 
+				tmp ~= _children[i].toPrettyXml(indent~cast(R)(getName.length?"	":"")); 
 			}
-			if (getName.length) tmp ~= indent~asCloseTag()~"\n";
+			if (getName.length) tmp ~= indent~asCloseTag()~cast(R)"\n";
 		}
 		return tmp;
 	
@@ -421,12 +492,12 @@ class XmlNode(R=string) if (isGoodType!R)
 	private void parseCData(XmlNode!R parent,ref R xsrc,bool preserveWS) {
 		ptrdiff_t slice;
 		R token;
-		slice = readUntil(xsrc,"<");
+		slice = readUntil(xsrc,cast(R)"<");
 		token = xsrc[0..slice];
 		// don't break xml whitespace specs unless requested
-		if (!preserveWS) token = stripr(token);
-		xsrc = xsrc[slice..$];
-		debug(xml)logline("I found cdata text: "~token~"\n");
+		if (!preserveWS) token = stripRight(token);
+		xsrc = xsrc[slice..xsrc.length];
+		debug(xml)logline("I found cdata text: "~cast(string)token~"\n");
 		// DO NOT CHANGE THIS TO USE THE CONSTRUCTOR, BECAUSE THE CONSTRUCTOR IS FOR USER USE
 		auto cd = (_docroot?_docroot.allocCData:new CData!R);
 		cd._cdata = token;
@@ -437,23 +508,23 @@ class XmlNode(R=string) if (isGoodType!R)
 	private void parseCloseTag(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
 		R token;
-		slice = readUntil(xsrc,">");
+		slice = readUntil(xsrc,cast(R)">");
 		token = strip(xsrc[1..slice]);
-		xsrc = xsrc[slice+1..$];
-		debug(xml)logline("I found a closing tag (yikes):"~token~"\n");
-		if (token.icmp(parent.getName()) != 0) throw new XmlError("Wrong close tag: "~token~" for parent tag "~parent.getName);
+		xsrc = xsrc[slice+1..xsrc.length];
+		debug(xml)logline("I found a closing tag (yikes):"~cast(string)token~"\n");
+		if (icmp(token, parent.getName()) != 0) throw new XmlError("Wrong close tag: "~cast(string)token~" for parent tag "~cast(string)parent.getName);
 	}
 
 	// rip off a xml processing instruction, like the ones that come at the beginning of xml documents
 	private void parseXMLPI(XmlNode!R parent,ref R xsrc) {
 		// rip off <?
-		xsrc = stripl(xsrc[1..$]);
+		xsrc = stripLeft(xsrc[1..xsrc.length]);
 		// rip off name
 		R name = getWSToken(xsrc);
 		XmlPI!R newnode;
-		if (name[$-1] == '?') {
+		if (name[name.length-1] == '?') {
 			// and we're at the end of the element
-			name = name[0..$-1];
+			name = name[0..name.length-1];
 			newnode = (_docroot?_docroot.allocXmlPI:new XmlPI!R);
 			newnode.setName(name);
 			parent.addChild(newnode);
@@ -463,13 +534,13 @@ class XmlNode(R=string) if (isGoodType!R)
 		debug(xml)logline("Got a "~name~" XML processing instruction\n");
 		newnode = (_docroot?_docroot.allocXmlPI:new XmlPI!R);
 		newnode.setName(name);
-		xsrc = stripl(xsrc);
-		while(xsrc.length >= 2 && xsrc[0..2] != "?>") {
+		xsrc = stripLeft(xsrc);
+		while(xsrc.length >= 2 && xsrc[0..2] != cast(R)"?>") {
 			parseAttribute(newnode,xsrc);
 		}
 		// make sure that the ?> is there and rip it off
-		if (xsrc[0..2] != "?>") throw new XmlError("Could not find the end to xml processing instruction "~name);
-		xsrc = xsrc[2..$];
+		if (xsrc[0..2] != cast(R)"?>") throw new XmlError("Could not find the end to xml processing instruction "~cast(string)name);
+		xsrc = xsrc[2..xsrc.length];
 		parent.addChild(newnode);
 	}
 
@@ -477,10 +548,10 @@ class XmlNode(R=string) if (isGoodType!R)
 	private void parseUCData(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
 		R token;
-		xsrc = xsrc[7..$];
-		slice = readUntil(xsrc,"]]>");
+		xsrc = xsrc[7..xsrc.length];
+		slice = readUntil(xsrc,cast(R)"]]>");
 		token = xsrc[0..slice];
-		xsrc = xsrc[slice+3..$];
+		xsrc = xsrc[slice+3..xsrc.length];
 		debug(xml)logline("I found cdata text: "~token~"\n");
 		// DO NOT CHANGE THIS TO USE THE CONSTRUCTOR, BECAUSE THE CONSTRUCTOR IS FOR USER USE
 		auto cd = (_docroot?_docroot.allocCData:new CData!R);
@@ -492,10 +563,10 @@ class XmlNode(R=string) if (isGoodType!R)
 	private void parseComment(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
 		R token;
-		xsrc = xsrc[2..$];
-		slice = readUntil(xsrc,"-->");
+		xsrc = xsrc[2..xsrc.length];
+		slice = readUntil(xsrc,cast(R)"-->");
 		token = xsrc[0..slice];
-		xsrc = xsrc[slice+3..$];
+		xsrc = xsrc[slice+3..xsrc.length];
 		auto x = (_docroot?_docroot.allocXmlComment:new XmlComment!R);
 		x._comment = token;
 		parent.addChild(x);
@@ -505,11 +576,11 @@ class XmlNode(R=string) if (isGoodType!R)
 	private void parseXMLInst(XmlNode!R parent,ref R xsrc) {
 		ptrdiff_t slice;
 		R token;
-		slice = readUntil(xsrc,">");
+		slice = readUntil(xsrc,cast(R)">");
 		slice += ">".length;
 		if (slice>xsrc.length) slice = xsrc.length;
 		token = xsrc[0..slice];
-		xsrc = xsrc[slice..$];
+		xsrc = xsrc[slice..xsrc.length];
 		// XXX we probably want to do something with these
 	}
 
@@ -521,7 +592,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		debug(xml)logline("Got a "~name~" open tag\n");
 		auto newnode = (_docroot?_docroot.allocXmlNode:new XmlNode!R);
 		newnode.setName(name);
-		xsrc = stripl(xsrc);
+		xsrc = stripLeft(xsrc);
 		while(xsrc.length && xsrc[0] != '/' && xsrc[0] != '>') {
 			parseAttribute(newnode,xsrc);
 		}
@@ -529,18 +600,18 @@ class XmlNode(R=string) if (isGoodType!R)
 		parent.addChild(newnode);
 		if (xsrc[0] == '/') {
 			// strip off the / and go about business as normal
-			xsrc = stripl(xsrc[1..$]);
+			xsrc = stripLeft(xsrc[1..xsrc.length]);
 			// check for >
-			if (!xsrc.length || xsrc[0] != '>') throw new XmlError("Unable to find end of "~name~" tag");
-			xsrc = stripl(xsrc[1..$]);
+			if (!xsrc.length || xsrc[0] != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
+			xsrc = stripLeft(xsrc[1..xsrc.length]);
 			debug(xml)logline("self-closing tag!\n");
 			return;
 		} 
 		// check for >
-		if (!xsrc.length || xsrc[0] != '>') throw new XmlError("Unable to find end of "~name~" tag");
-		xsrc = xsrc[1..$];
+		if (!xsrc.length || xsrc[0] != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
+		xsrc = xsrc[1..xsrc.length];
 		// don't rape whitespace unless requested
-		if (!preserveWS) xsrc = stripl(xsrc);
+		if (!preserveWS) xsrc = stripLeft(xsrc);
 		// now that we've added all the attributes to the node, pass the rest of the string and the current node to the next node
 		int ret;
 		while (xsrc.length) {
@@ -551,7 +622,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		// make sure we found our closing tag
 		// this is where we can get sloppy for stream parsing
 		// throw a missing closing tag exception
-		if (!ret) throw new XmlError("Missing end tag for "~name);
+		if (!ret) throw new XmlError("Missing end tag for "~cast(string)name);
 	}
 
 	// returns everything after the first node TREE (a node can be text as well)
@@ -559,7 +630,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		// if it was just whitespace and no more text or tags, make sure that's covered
 		int ret = 0;
 		// this has been removed from normal code flow to be XML std compliant, preserve whitespace
-		if (!preserveWS) xsrc = stripl(xsrc); 
+		if (!preserveWS) xsrc = stripLeft(xsrc); 
 		debug(xml)logline("Parsing text: "~xsrc~"\n");
 		if (!xsrc.length) {
 			return 0;
@@ -569,7 +640,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			parseCData(parent,xsrc,preserveWS);
 			return 0;
 		} 
-		xsrc = xsrc[1..$];
+		xsrc = xsrc[1..xsrc.length];
 		
 		// types of tags, gotta make sure we find the closing > (or ]]> in the case of ucdata)
 		switch(xsrc[0]) {
@@ -587,14 +658,14 @@ class XmlNode(R=string) if (isGoodType!R)
 			parseXMLPI(parent,xsrc);
 			break;
 		case '!':
-			xsrc = stripl(xsrc[1..$]);
+			xsrc = stripLeft(xsrc[1..xsrc.length]);
 			// 10 is the magic number that allows for the empty cdata string [CDATA[]]>
-			if (xsrc.length >= 10 && xsrc[0..7].cmp("[CDATA[") == 0) {
+			if (xsrc.length >= 10 && cmp(xsrc[0..7], cast(R)"[CDATA[") == 0) {
 				// unparsed cdata!
 				parseUCData(parent,xsrc);
 				break;
 			// make sure we parse out comments, minimum length for this is 7 (<!---->)
-			} else if (xsrc.length >= 5 && xsrc[0..2].cmp("--") == 0) {
+			} else if (xsrc.length >= 5 && cmp(xsrc[0..2], cast(R)"--") == 0) {
 				parseComment(parent,xsrc);
 				break;
 			}
@@ -607,24 +678,18 @@ class XmlNode(R=string) if (isGoodType!R)
 
 	// read data until the delimiter is found, return the index where the delimiter starts
 	private ptrdiff_t readUntil(R xsrc, R delim) {
-		// the -delim.length is partially optimization and partially avoiding jumping the array bounds
-		ptrdiff_t i = xsrc.find(delim);
-		// yeah...if we didn't find it, then the whole string is the token :D
-		if (i == -1) {
-			return xsrc.length;
-		}
-		return i;
+		return xsrc.length - find(xsrc, delim).length;
 	}
 
 	// basically to get the name off of open tags
 	private R getWSToken(ref R input) {
-		input = stripl(input);
+		input = stripLeft(input);
 		int i;
 		for(i=0;i<input.length && !isspace(input[i]) && input[i] != '>' && input[i] != '/' && input[i] != '<' && input[i] != '=' && input[i] != '!';i++){}
 		auto ret = input[0..i];
-		input = input[i..$];
+		input = input[i..input.length];
 		if (!ret.length) {
-			throw new XmlError("Unable to parse token at: "~input);
+			throw new XmlError("Unable to parse token at: "~cast(string)input);
 		}
 		return ret;
 	}
@@ -635,64 +700,64 @@ class XmlNode(R=string) if (isGoodType!R)
 			int i;
 			for(i=0;i < input.length && !isspace(input[i]) && input[i] != '=';i++){}
 			auto ret = input[0..i];
-			input = input[i..$];
+			input = input[i..input.length];
 			return ret;
 		}
 		auto ripValue(ref R input) {
 		        int x;
 			char quot = input[0];
 			// rip off the starting quote
-		        input = input[1..$];
+		        input = input[1..input.length];
 			// find the end of the string we want
 		        for(x = 0;input[x] != quot && x < input.length;x++) {
 		        }
 		        auto tmp = input[0..x];
 			// add one to leave off the quote
-		        input = input[x+1..$];
+		        input = input[x+1..input.length];
 		        return tmp;
 		}
 
 		// snag the name from the attribute string
 		R value,name = ripName(attrstr);
-		attrstr = stripl(attrstr);
+		attrstr = stripLeft(attrstr);
 		// check for = to make sure the attribute string is kosher
-		if (!attrstr.length) throw new XmlError("Unexpected end of attribute string near "~name);
-		if (attrstr[0] != '=') throw new XmlError("Missing = in attribute string with name "~name);
+		if (!attrstr.length) throw new XmlError("Unexpected end of attribute string near "~cast(string)name);
+		if (attrstr[0] != '=') throw new XmlError("Missing = in attribute string with name "~cast(string)name);
 		// rip off =
-		attrstr = attrstr[1..$];
-		attrstr = stripl(attrstr);
+		attrstr = attrstr[1..attrstr.length];
+		attrstr = stripLeft(attrstr);
 		if (attrstr.length) {
 			if (attrstr[0] == '"' || attrstr[0] == '\'') {
 				value = ripValue(attrstr);
 			} else {
-				throw new XmlError("Unquoted attribute value for "~xml.getName~", starting at: "~attrstr);
+				throw new XmlError("Unquoted attribute value for "~cast(string)xml.getName~", starting at: "~cast(string)attrstr);
 			}
 		} else {
-			throw new XmlError("Unexpected end of input for attribute "~name~" in node "~xml.getName);
+			throw new XmlError("Unexpected end of input for attribute "~cast(string)name~" in node "~cast(string)xml.getName);
 		}
 		debug(xml)logline("Got attr "~name~" and value \""~value~"\"\n");
 		xml._attributes[name] = value;
-		attrstr = stripl(attrstr);
+		attrstr = stripLeft(attrstr);
 	}
 
 	/// Do an XPath search on this node and return all matching nodes.
 	/// This function does not perform any modifications to the tree and so does not support XML mutation.
 	XmlNode!R[] parseXPath(R xpath,bool caseSensitive = false) {
 		// rip off the leading / if it's there and we're not looking for a deep path
-		if (!isDeepPath(xpath) && xpath.length && xpath[0] == '/') xpath = xpath[1..$];
+		if (!isDeepPath(xpath) && xpath.length && xpath[0] == '/') xpath = xpath[1..xpath.length];
 		debug(xpath)logline("Got xpath "~xpath~" in node "~getName~"\n");
 		R truncxpath;
 		auto nextnode = getNextNode(xpath,truncxpath);
 		R attrmatch;
 		// XXX need to be able to split the attribute match off even when it doesn't have [] around it
-		ptrdiff_t offset = nextnode.find("[");
-		if (offset != -1) {
+		ptrdiff_t offset = nextnode.length - find(nextnode, cast(R)"[").length;
+		if (offset != nextnode.length) {
 			// rip out attribute string
-			attrmatch = nextnode[offset..$];
+			attrmatch = nextnode[offset..nextnode.length];
 			nextnode = nextnode[0..offset];
-			debug(xpath)logline("Found attribute chunk: "~attrmatch~"\n");
+			debug(xpath)logline("Found attribute chunk: "~cast(string)attrmatch~"\n");
 		}
-		debug(xpath)logline("Looking for "~nextnode~"\n");
+		debug(xpath)logline("Looking for "~cast(string)nextnode~"\n");
 		XmlNode[]retarr;
 		// search through the children to see if we have a direct match on the next node
 		if (!nextnode.length) {
@@ -700,7 +765,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			debug(xpath)logline("Found a node we want! name is: "~getName~"\n");
 			retarr ~= this;
 		} else foreach(child;getChildren) if (!child.isCData && !child.isXmlComment && !child.isXmlPI && child.matchXPathPredicate(attrmatch,caseSensitive)) {
-			if (!nextnode.length || (caseSensitive && child.getName == nextnode) || (!caseSensitive && !child.getName().icmp(nextnode))) {
+			if (!nextnode.length || (caseSensitive && child.getName == nextnode) || (!caseSensitive && !icmp(child.getName(), nextnode))) {
 				// child that matches the search string, pass on the truncated string
 				debug(xpath)logline("Sending "~truncxpath~" to "~child.getName~"\n");
 				retarr ~= child.parseXPath(truncxpath,caseSensitive);
@@ -722,18 +787,21 @@ class XmlNode(R=string) if (isGoodType!R)
 		if (!attrstr.length) {
 			return true;
 		}
-		if (attrstr[0] == '[' && attrstr[$-1] == ']') {
-			attrstr = attrstr[1..$-1];
-		} else if (attrstr[0] == '[' || attrstr[$-1] == ']') {
+		if (attrstr[0] == '[' && attrstr[attrstr.length-1] == ']') {
+			attrstr = attrstr[1..attrstr.length-1];
+		} else if (attrstr[0] == '[' || attrstr[attrstr.length-1] == ']') {
 			// this seems to be malformed
-			throw new XPathError("got malformed attribute match "~attrstr~"\n");
+			throw new XPathError("got malformed attribute match "~cast(string)attrstr~"\n");
 		}
 		// rip apart the xpath predicate assuming it's node and attribute matches
 		R[]attrlist;
 		// basically, we're splitting on " and " and " or ", but while respecting []
-		int bcount = 0;
+		int bcount = 0, i = 0;
 		ptrdiff_t lslice = 0;
-		foreach (i,c;attrstr) {
+		R tmpattrstr = attrstr;
+		//foreach (i,c;attrstr) {
+		while(!tmpattrstr.empty()) {
+			auto c = tmpattrstr.front;
 			if (c == '[') {
 				bcount++;
 			} else if (c == ']') {
@@ -744,16 +812,18 @@ class XmlNode(R=string) if (isGoodType!R)
 				}
 				lslice = i+1;
 			}
+			i++;
+			tmpattrstr.popFront();
 		}
 		// tack the last one on
-		attrlist ~= attrstr[lslice..$];
+		attrlist ~= attrstr[lslice..attrstr.length];
 		// length must be odd, otherwise the string is jank
-		if (!(attrlist.length%2)) throw new XPathError("Encountered a janky predicate: "~attrstr);
+		if (!(attrlist.length%2)) throw new XPathError("Encountered a janky predicate: "~cast(string)attrstr);
 		// verify that odd numbers are "and" or "or"
-		foreach (i,attr;attrlist) if (i%2 && attr != "and" && attr != "or") {
-			throw new XPathError("Encountered consecutive terms not separated by \"and\" or \"or\" starting at: "~attr);
-		} else if (!(i%2) && (attr == "and" || attr == "or")) {
-			throw new XPathError("Encountered consecutive joining terms (\"and\" or \"or\") in: "~attrstr);
+		foreach (j,attr;attrlist) if (j%2 && attr != cast(R)"and" && attr != cast(R)"or") {
+			throw new XPathError("Encountered consecutive terms not separated by \"and\" or \"or\" starting at: "~cast(string)attr);
+		} else if (!(j%2) && (attr == cast(R)"and" || attr == cast(R)"or")) {
+			throw new XPathError("Encountered consecutive joining terms (\"and\" or \"or\") in: "~cast(string)attrstr);
 		}
 		bool[]res;
 		res.length = attrlist.length;
@@ -761,51 +831,51 @@ class XmlNode(R=string) if (isGoodType!R)
 		debug(xpath)foreach (attr;attrlist) {
 			logline("Term: "~attr~"\n");
 		}
-		foreach (i,attr;attrlist) if (!(i%2)) {
-			debug(xpath)logline("matching on "~attr~"\n");
+		foreach (j,attr;attrlist) if (!(j%2)) {
+			debug(xpath)logline("matching on "~cast(string)attr~"\n");
 			// check to see if we're doing an attribute match
 			// there should be NO zero-length strings this far in
 			if (attr[0] == '@') {
-				attr = attr[1..$];
+				attr = attr[1..attr.length];
 				R comparator;
 				auto attrname = getWSToken(attr);
 				bool verbatim = false;
-				attr = stripl(attr);
+				attr = stripLeft(attr);
 				// if there is still data in attr, it's time to look for a comparison operator
 				if (attr.length) {
 					// figure out what comparison needs to be done
 					if (attr.length > 1 && (attr[0] == '<' || attr[0] == '>' || attr[0] == '!') && attr[1] == '=') {
 						comparator = attr[0..2];
-						attr = stripl(attr[2..$]);
+						attr = stripLeft(attr[2..attr.length]);
 					} else if (attr[0] == '<' || attr[0] == '>' || attr[0] == '=') {
 						comparator = attr[0..1];
-						attr = stripl(attr[1..$]);
+						attr = stripLeft(attr[1..attr.length]);
 					} else {
-						throw new XPathError("Could not determine comparator at: "~attr);
+						throw new XPathError("Could not determine comparator at: "~cast(string)attr);
 					}
 					// strip off quotes if necessary
-					if (attr.length > 1 && attr[0] == '"' && attr[$-1] == '"') {
-						attr = attr[1..$-1];
+					if (attr.length > 1 && attr[0] == '"' && attr[attr.length-1] == '"') {
+						attr = attr[1..attr.length-1];
 						verbatim = true;
 					}
 				}
 				// the !attr.length is just a precaution for the idiots that would do it
 				if (comparator.length && !attr.length) throw new XPathError("Got a comparator without anything to compare");
 				if (!hasAttribute(attrname)) {
-					debug(xpath)logline("could not find "~attrname~"\n");
-					res[i] = false;
+					debug(xpath)logline("could not find "~cast(string)attrname~"\n");
+					res[j] = false;
 					continue;
 				}
 				if (comparator.length) {
-					bool lres,neg = false,i1num = isNumeric(getAttribute(attrname)),i2num = isNumeric(attr);
+					bool lres,neg = false,i1num = isNumeric(cast(string)getAttribute(attrname)),i2num = isNumeric(cast(string)attr);
 					// currently ignoring verbatim in this section of code
 					// we can't compare non-numerics without quotes
 					if (!verbatim && (!i2num || !i2num)) {
-						res[i] = false;
+						res[j] = false;
 						continue;
 					}
 					// get numeric equivalents
-					double i1 = atof(getAttribute(attrname)),i2 = atof(attr);
+					double i1 = atof(cast(string)getAttribute(attrname)),i2 = atof(cast(string)attr);
 					// XXX need to beware of verbatim here
 					if (comparator[0] == '<') {
 						lres = (i1 < i2);
@@ -813,10 +883,10 @@ class XmlNode(R=string) if (isGoodType!R)
 						lres = (i1 > i2);
 					} else if (comparator[0] == '!') neg = true;
 					// check to see if equality is also called for
-					if (comparator.length > 1 || comparator == "=") {
+					if (comparator.length > 1 || comparator == cast(R)"=") {
 						if (verbatim) {
-							if ((getAttribute(attrname) != attr && caseSen) || (getAttribute(attrname).icmp(attr) != 0 && !caseSen)) {
-								debug(xpath)logline("search value "~attr~" did not match attribute value "~getAttribute(attrname)~"\n");
+							if ((getAttribute(attrname) != attr && caseSen) || (icmp(getAttribute(attrname), attr) != 0 && !caseSen)) {
+								debug(xpath)logline("search value "~cast(string)attr~" did not match attribute value "~cast(string)getAttribute(attrname)~"\n");
 								lres = false;
 							} else {
 								lres = true;
@@ -826,30 +896,30 @@ class XmlNode(R=string) if (isGoodType!R)
 						}
 						if (neg) lres = !lres;
 					}
-					res[i] = lres;
+					res[j] = lres;
 					continue;
 				}
-				res[i] = true;
+				res[j] = true;
 				continue;
 			}
 			// XXX take care of other types of matches other than attribute matches
-		} else if (attr == "or") {
+		} else if (attr == cast(R)"or") {
 			numOrdTerms++;
 		}
 		// collect "and" terms into "or" groups
 		bool[]ordTerms;
 		ordTerms.length = numOrdTerms + 1;
 		ordTerms[0] = res[0];
-		debug(xpath)logline("res[0]="~to!(R)(res[0])~"\n");
+		debug(xpath)logline("res[0]="~to!(string)(res[0])~"\n");
 		numOrdTerms = 0; // we're using this as current position, now
-		foreach (i,attr;attrlist) if (i%2) {
-			if (attr == "and") {
-				debug(xpath)logline("combining anded terms on ord term "~to!(R)(numOrdTerms)~" and i="~to!(R)(i)~" with res.length="~to!(R)(res.length)~" and attrlist.length="~to!(R)(attrlist.length)~"\n");
-				ordTerms[numOrdTerms] &= res[i+1];
-				debug(xpath)logline("res["~to!(R)(i+1)~"]="~to!(R)(res[i+1])~"\n");
-			} else if (attr == "or") {
+		foreach (j,attr;attrlist) if (j%2) {
+			if (attr == cast(R)"and") {
+				debug(xpath)logline("combining anded terms on ord term "~to!(string)(numOrdTerms)~" and i="~to!(string)(j)~" with res.length="~to!(string)(res.length)~" and attrlist.length="~to!(string)(attrlist.length)~"\n");
+				ordTerms[numOrdTerms] &= res[j+1];
+				debug(xpath)logline("res["~to!(string)(j+1)~"]="~to!(string)(res[j+1])~"\n");
+			} else if (attr == cast(R)"or") {
 				numOrdTerms++;
-				ordTerms[numOrdTerms] = res[i+1];
+				ordTerms[numOrdTerms] = res[j+1];
 			} else {
 				throw new XPathError("Erm...nuh uh");
 			}
@@ -857,7 +927,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		// now that results have been determined, map them to a final result using "and" and "or"
 		bool ret = false;
 		foreach (val;ordTerms) ret |= val;
-		debug(xpath)logline("Ended up with "~to!(R)(ret)~"\n");
+		debug(xpath)logline("Ended up with "~to!(string)(ret)~"\n");
 		return ret;
 	}
 	
@@ -871,17 +941,22 @@ class XmlNode(R=string) if (isGoodType!R)
 
 	// this does not modify the incoming string, only pulls a slice out of it
 	private auto getNextNode(R xpath,out R truncxpath) {
-		if (isDeepPath(xpath)) xpath = xpath[2..$];
+		if (isDeepPath(xpath)) xpath = xpath[2..xpath.length];
 		// dig through the pile of xpath, but make sure to respect attribute matches properly
-		int contexts = 0;
-		foreach (i,c;xpath) {
+		int contexts = 0, i = 0;
+		R tmpxpath = xpath;
+		//foreach (i,c;xpath) {
+		while(!tmpxpath.empty()) {
+			auto c = tmpxpath.front;
 			if (c == '[') contexts++;
 			if (c == ']') contexts--;
 			if (c == '/' && !contexts) {
 				// we've found the end of the current node
-				truncxpath = xpath[i..$];
+				truncxpath = xpath[i..xpath.length];
 				return xpath[0..i];
 			}
+			tmpxpath.popFront();
+			i++;
 		}
 		// i'm not sure this can occur unless the string was blank to begin with...
 		truncxpath = null;
@@ -909,6 +984,31 @@ class XmlNode(R=string) if (isGoodType!R)
 		if (childnum > _children.length) throw new Exception("Child element assignment is outside of array bounds");
 		_children[childnum] = x;
 		return this;
+	}
+
+	override bool opEquals(Object o) {
+		auto cmp = cast(XmlNode!R)o;
+		if (cmp is null) {
+			return false;
+		}
+		// quick check to make sure things are the same before we go deeper
+		if (getName != cmp.getName) {
+			return false;
+		}
+		if (getChildren != cmp.getChildren) {
+			return false;
+		}
+		// compare attributes
+		foreach(attrib,value;getAttributes) {
+			if (!(attrib in cmp.getAttributes)) {
+				return false;
+			}
+			if (value != cmp.getAttribute(attrib)) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 }
 
@@ -953,10 +1053,10 @@ class CData(R=string) : XmlNode!R
 
 	/// This outputs escaped XML entities for use on the network or in a document in pretty, tabbed format.
 	protected override R toPrettyXml(R indent = cast(R)"") {
-		return indent~toXml()~"\n";
+		return indent~toXml()~cast(R)"\n";
 	}
 
-	override R asCloseTag() { return null; }
+	override R asCloseTag() { return cast(R)""; }
 
 	/// This throws an exception because CData nodes do not have names.
 	override R getName() {
@@ -1007,6 +1107,17 @@ class CData(R=string) : XmlNode!R
 	override XmlNode!R addCData(R cdata) {
 		throw new XmlError("Cannot add a child node to CData.");
 	}
+
+	override bool opEquals(Object o) {
+		auto cmp = cast(CData!R)o;
+		if (cmp is null) {
+			return false;
+		}
+		if (getCData != cmp.getCData) {
+			return false;
+		}
+		return true;
+	}
 }
 
 /// A class specialization for XML instructions.
@@ -1021,7 +1132,7 @@ class XmlPI(R=string) : XmlNode!R {
 	/// This node can't have children, and so can't have CData.
 	/// Should this throw an exception?
 	override R getCData() {
-		return null;
+		return cast(R)"";
 	}
 
 	/// Override toXml for output to be used by parsers.
@@ -1042,20 +1153,20 @@ class XmlPI(R=string) : XmlNode!R {
 
 	/// Pretty print to be used by parsers.
 	protected override R toPrettyXml(R indent = cast(R)"") {
-		return indent~asOpenTag()~"\n";
+		return indent~asOpenTag()~cast(R)"\n";
 	}
 
 	// internal function to generate opening tags
 	override R asOpenTag() {
 		if (_name.length == 0) {
-			return null;
+			return cast(R)"";
 		}
-		auto s = "<?" ~ _name ~ genAttrString() ~ "?>";
+		auto s = cast(R)"<?" ~ _name ~ genAttrString() ~ cast(R)"?>";
 		return s;
 	}
 
 	// internal function to generate closing tags
-	override R asCloseTag() { return null; }
+	override R asCloseTag() { return cast(R)""; }
 
 	/// You can't add a child to something that can't have children.  There is no adoption in XML world.
 	override XmlNode!R addChild(XmlNode!R newNode) {
@@ -1066,6 +1177,17 @@ class XmlPI(R=string) : XmlNode!R {
 	/// Especially for red-headed stepchildren CData nodes.
 	override XmlNode!R addCData(R cdata) {
 		throw new XmlError("Cannot add a child node to XmlPI.");
+	}
+
+	override bool opEquals(Object o) {
+		auto cmp = cast(XmlPI!R)o;
+		if (cmp is null) {
+			return false;
+		}
+		if (getName != cmp.getName || getAttributes != cmp.getAttributes) {
+			return false;
+		}
+		return true;
 	}
 }
 
@@ -1164,6 +1286,17 @@ class XmlComment(R=string) : XmlNode!R {
 	/// Ditto. (this throws an exception)
 	override XmlNode!R addCData(R cdata) {
 		throw new XmlError("Cannot add a child node to comment.");
+	}
+
+	override bool opEquals(Object o) {
+		auto cmp = cast(XmlComment!R)o;
+		if (cmp is null) {
+			return false;
+		}
+		if (_comment != cmp._comment) {
+			return false;
+		}
+		return true;
 	}
 }
 
@@ -1292,48 +1425,59 @@ class XmlDocument(R=string) : XmlNode!R {
 		}
 		return tmp;
 	}
+
+	override bool opEquals(Object o) {
+		auto cmp = cast(XmlDocument!R)o;
+		if (cmp is null) {
+			return false;
+		}
+		if (getChildren != cmp.getChildren) {
+			return false;
+		}
+		return true;
+	}
 }
 
 
 /// Encode characters such as &, <, >, etc. as their xml/html equivalents
 auto xmlEncode(R)(R src) {
-        src = replace(src, "&", "&amp;");
-        src = replace(src, "<", "&lt;");
-        src = replace(src, ">", "&gt;");
-        src = replace(src, "\"", "&quot;");
-        src = replace(src, "'", "&apos;");
+        src = replace(cast(string)src, "&", "&amp;");
+        src = replace(cast(string)src, "<", "&lt;");
+        src = replace(cast(string)src, ">", "&gt;");
+        src = replace(cast(string)src, "\"", "&quot;");
+        src = replace(cast(string)src, "'", "&apos;");
         return src;
 }
 
 /// Convert xml-encoded special characters such as &amp;amp; back to &amp;.
 auto xmlDecode(R)(R src) {
-        src = replace(src, "&lt;",  "<");
-        src = replace(src, "&gt;",  ">");
-        src = replace(src, "&apos;", "'");
-        src = replace(src, "&quot;",  "\"");
+        src = replace(cast(string)src, "&lt;",  "<");
+        src = replace(cast(string)src, "&gt;",  ">");
+        src = replace(cast(string)src, "&apos;", "'");
+        src = replace(cast(string)src, "&quot;",  "\"");
 	// take care of decimal character entities
-	src = regrep(src,"&#\\d{1,8};",(R m) {
+	src = regrep(cast(string)src,"&#\\d{1,8};",(string m) {
 		auto cnum = m[2..m.length-1];
 		dchar dnum = cast(dchar)to!(int)(cnum);
-		return quickUTF8!R(dnum);
+		return quickUTF8(dnum);
 	});
 	// take care of hex character entities
-	src = regrep(src,"&#[xX][0-9a-fA-F]{1,8};",(R m) {
+	src = regrep(cast(string)src,"&#[xX][0-9a-fA-F]{1,8};",(string m) {
 		auto cnum = m[3..$-1];
 		dchar dnum = hex2dchar(cnum);
-		return quickUTF8!R(dnum);
+		return quickUTF8(dnum);
 	});
-        src = replace(src, "&amp;", "&");
+        src = replace(cast(string)src, "&amp;", "&");
         return src;
 }
 
 // a quick dchar to utf8 conversion
-private auto quickUTF8(R)(dchar dachar) {
+private auto quickUTF8(dchar dachar) {
 	char[]ret;
 	foreach(char r;[dachar]) {
 		ret ~= r;
 	}
-	return cast(R)ret;
+	return cast(string)ret;
 }
 
 // convert a hex string to a raw dchar
@@ -1360,9 +1504,113 @@ private dchar toHVal(char digit) {
 	return 0;
 }
 
+version(unittest) {
+	struct custring {
+		string data;
+		this(string assgn) {data = assgn;}
+		//void opAssign(void* takenulls) {}
+		void opAssign(string assgn) {data = assgn;}
+		void opAssign(custring assgn) {data = assgn.data;}
+		string opCast(string)() {return data;}
+		/*custring opCast_r(custring)(string input) {
+			return custring(input);
+		}*/
+		custring opBinary(string op)(custring b) {
+			static if (op == "~") {
+				custring concat;
+				concat.data = data~b.data;
+				return concat;
+			} else static assert(0, "Operator "~op~" not implemented");
+		}
+		custring opOpAssign(string op)(custring b) {
+			static if (op == "~") {
+				data ~= b.data;
+				return this;
+			} else static assert(0, "OpAssign operator "~op~" not implemented");
+		}
+		@property {
+			size_t length() const {return data.length;}
+			void length(size_t len) {data.length = len;}
+		}
+		bool opEquals(custring b) {return data == b.data;}
+		char opIndex(size_t index) {return data[index];}
+		custring opIndex() {
+			custring n;
+			n.data = data;
+			return n;
+		}
+		custring opSlice(size_t a, size_t b) {
+			custring n;
+			n.data = data[a..b];
+			return n;
+		}
+		bool empty() const {return !data.length;}
+		char front() const {return data[0];}
+		void popFront() {data = data[1..$];}
+		const hash_t toHash() {
+			hash_t hash;
+			foreach (char c; data) {
+				hash = (hash * 9) + c;
+			}
+			return hash;
+		}
+		const int opCmp(ref const custring c) {
+			return c.data != data;
+		}
+	}
+
+	void runTests(R)(R xmlstring) {
+		logline("Running "~R.stringof~" tests\n");
+		auto xml = readDocument(xmlstring);
+		xmlstring = xml.toXml;
+		// ensure that the string doesn't mutate after a second reading, it shouldn't
+		logline("kxml.xml test\n");
+		assert(readDocument(xmlstring).toXml == xmlstring);
+		logline("kxml.xml XPath test\n");
+		auto searchlist = xml.parseXPath(cast(R)"message/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		logline("kxml.xml deep XPath test\n");
+		searchlist = xml.parseXPath(cast(R)"//message//flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		logline("kxml.xml attribute match 'and' XPath test\n");
+		searchlist = xml.parseXPath(cast(R)"/message[@type=\"message\" and @responseID=\"1234abcd\"]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"message[@type=\"toaster\"]/flags");
+		assert(searchlist.length == 0);
+	
+		logline("kxml.xml attribute match 'or' XPath test\n");
+		searchlist = xml.parseXPath(cast(R)"/message[@type=\"message\" or @responseID=\"134abcd\"]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@type=\"yarblemessage\" or @responseID=\"1234abcd\"]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		logline("kxml.xml XPath inequality test\n");
+		searchlist = xml.parseXPath(cast(R)"/message[@order<6]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order>4]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order>=5]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order<=5]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order!=1]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order=5]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		/*logline("kxml.xml XPath subnote match test\n");
+		searchlist = xml.parseXPath("/message[flags@tweak]");
+		assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
+	}
+}
+
 unittest {
 	string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
-	auto xml = xmlstring.readDocument();
+	runTests(xmlstring);
+	runTests(cast(custring)xmlstring);
+/*	auto xml = xmlstring.readDocument();
 	xmlstring = xml.toXml;
 	// ensure that the string doesn't mutate after a second reading, it shouldn't
 	logline("kxml.xml test\n");
@@ -1400,52 +1648,10 @@ unittest {
 	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
 	searchlist = xml.parseXPath("/message[@order=5]/flags");
 	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-
+*/
 	/*logline("kxml.xml XPath subnote match test\n");
 	searchlist = xml.parseXPath("/message[flags@tweak]");
 	assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
-
-	struct custring {
-		string data;
-		this(string assgn) {data = assgn;}
-		//void opAssign(void* takenulls) {}
-		void opAssign(string assgn) {data = assgn;}
-		void opAssign(custring assgn) {data = assgn.data;}
-		string opCast(string)() {return data;}
-		custring opBinary(string op)(custring b) {
-			static if (op == "~") {
-				custring concat;
-				concat.data = data~b.data;
-				return concat;
-			} else static assert(0, "Operator "~op~" not implemented");
-		}
-		@property {
-			size_t length() const {return data.length;}
-			void length(size_t len) {data.length = len;}
-		}
-		bool opEquals(custring b) {return data == b.data;}
-		char opIndex(size_t index) {return data[index];}
-		custring opIndex() {
-			custring n;
-			n.data = data;
-			return n;
-		}
-		custring opSlice(size_t a, size_t b) {
-			custring n;
-			n.data = data[a..b];
-			return n;
-		}
-		bool empty() const {return !data.length;}
-		char front() const {return data[0];}
-		void popFront() {data = data[1..$];}
-	}
-	custring xmlcustring = null;
-	xmlcustring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
-	//auto xmlcu = readDocument(xmlcustring);
-	//xmlcustring = xmlcu.toXml;
-	// ensure that the string doesn't mutate after a second reading, it shouldn't
-	//logline("custring kxml.xml test\n");
-	//assert(readDocument(xmlcustring).toXml == xmlcustring);
 }
 
 version(XML_main) {
