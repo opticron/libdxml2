@@ -64,12 +64,20 @@ private void logline(string str) {
 }
 
 import core.exception:RangeError;
-import std.range:isInputRange,empty,front,popFront;
+import std.range:isInputRange,isForwardRange,isBidirectionalRange,empty,front,popFront,save,back,popBack;
 import std.uni:isWhite,toLower;
 
 /* custom version of strip that uses the below */
 R strip(R)(R tostrip) {
 	return stripLeft(stripRight(tostrip));
+}
+
+unittest {
+	logline("string strip test\n");
+	string a = " asdf  a  ";
+	assert("asdf  a" == strip(a));
+	logline("custring strip test\n");
+	assert(cast(custring)"asdf  a" == strip(cast(custring)a));
 }
 /* custom version of stripLeft that relies only on isInputRange capabilities */
 R stripLeft(R)(R tostrip) if (isInputRange!R) {
@@ -78,15 +86,28 @@ R stripLeft(R)(R tostrip) if (isInputRange!R) {
 	}
 	return tostrip;
 }
-/* I've already guaranteed that R has length and has slicing by "virtue" of using isGoodType below,
- * so here is a version of stripRight that relies only on slicing and length 
- *
- * this is gross for anything that's not an array */
-R stripRight(R)(R tostrip) {
-	while(tostrip.length && isWhite(tostrip[tostrip.length-1])) {
-		tostrip = tostrip[0..tostrip.length-1];
+
+unittest {
+	logline("string stripLeft test\n");
+	string a = " asdf  a  ";
+	assert("asdf  a  " == stripLeft(a));
+	logline("custring stripLeft test\n");
+	assert(cast(custring)"asdf  a  " == stripLeft(cast(custring)a));
+}
+/* custom version of stripRight that relies only on isBidirectionalRange capabilities */
+R stripRight(R)(R tostrip) if (isBidirectionalRange!R) {
+	while(!tostrip.empty() && isWhite(tostrip.back)) {
+		tostrip.popBack();
 	}
 	return tostrip;
+}
+
+unittest {
+	logline("string stripRight test\n");
+	string a = " asdf  a  ";
+	assert(" asdf  a" == stripRight(a));
+	logline("custring stripRight test\n");
+	assert(cast(custring)" asdf  a" == stripRight(cast(custring)a));
 }
 /* custom icmp using generic cmp w/ predicate */
 import std.algorithm:cmp;
@@ -95,15 +116,15 @@ int icmp(R)(R s1, R s2) {
 	return cmp!(doCompare,R,R)(s1,s2);
 }
 
-R find(R)(R haystack, R needle) {
+R find(R)(R haystack, R needle) if (isForwardRange!R) {
 	if (needle.empty()) {
 		return needle;
 	}
 	// find beginning of needle
 	while(!haystack.empty()) {
 		if (haystack.front == needle.front) {
-			R nhaystack = haystack;
-			R nneedle = needle;
+			R nhaystack = haystack.save;
+			R nneedle = needle.save;
 			// walk it down
 			while(!nhaystack.empty() && !nneedle.empty()) {
 				if (nhaystack.front == nneedle.front) {
@@ -142,7 +163,7 @@ template isGoodType(R)
 		R r = void;
 		auto s = r[1 .. 2];
 		auto t = s ~ r;
-		static assert(isInputRange!(typeof(s)));
+		static assert(isBidirectionalRange!(typeof(s)));
 		static assert(is(typeof(r.length) : ulong));
 	}));
 }
@@ -1508,13 +1529,9 @@ version(unittest) {
 	struct custring {
 		string data;
 		this(string assgn) {data = assgn;}
-		//void opAssign(void* takenulls) {}
 		void opAssign(string assgn) {data = assgn;}
 		void opAssign(custring assgn) {data = assgn.data;}
 		string opCast(string)() {return data;}
-		/*custring opCast_r(custring)(string input) {
-			return custring(input);
-		}*/
 		custring opBinary(string op)(custring b) {
 			static if (op == "~") {
 				custring concat;
@@ -1532,7 +1549,6 @@ version(unittest) {
 			size_t length() const {return data.length;}
 			void length(size_t len) {data.length = len;}
 		}
-		bool opEquals(custring b) {return data == b.data;}
 		char opIndex(size_t index) {return data[index];}
 		custring opIndex() {
 			custring n;
@@ -1544,9 +1560,23 @@ version(unittest) {
 			n.data = data[a..b];
 			return n;
 		}
+		// Start InputRange functions
 		bool empty() const {return !data.length;}
 		char front() const {return data[0];}
 		void popFront() {data = data[1..$];}
+		// End InputRange functions
+
+		// Start ForwardRange functions
+		custring save() {return this;}
+		// End ForwardRange functions
+
+		// Start BidirectionalRange functions
+		char back() const {return data[$-1];}
+		void popBack() {data = data[0..$-1];}
+		// End BidirectionalRange functions
+
+		// Start hashing functions
+		bool opEquals(custring b) {return data == b.data;}
 		const hash_t toHash() {
 			hash_t hash;
 			foreach (char c; data) {
@@ -1557,6 +1587,7 @@ version(unittest) {
 		const int opCmp(ref const custring c) {
 			return c.data != data;
 		}
+		// End hashing functions
 	}
 
 	void runTests(R)(R xmlstring) {
@@ -1610,48 +1641,6 @@ unittest {
 	string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
 	runTests(xmlstring);
 	runTests(cast(custring)xmlstring);
-/*	auto xml = xmlstring.readDocument();
-	xmlstring = xml.toXml;
-	// ensure that the string doesn't mutate after a second reading, it shouldn't
-	logline("kxml.xml test\n");
-	assert(xmlstring.readDocument().toXml == xmlstring);
-	logline("kxml.xml XPath test\n");
-	auto searchlist = xml.parseXPath("message/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-
-	logline("kxml.xml deep XPath test\n");
-	searchlist = xml.parseXPath("//message//flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-
-	logline("kxml.xml attribute match 'and' XPath test\n");
-	searchlist = xml.parseXPath("/message[@type=\"message\" and @responseID=\"1234abcd\"]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-	searchlist = xml.parseXPath("message[@type=\"toaster\"]/flags");
-	assert(searchlist.length == 0);
-
-	logline("kxml.xml attribute match 'or' XPath test\n");
-	searchlist = xml.parseXPath("/message[@type=\"message\" or @responseID=\"134abcd\"]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-	searchlist = xml.parseXPath("/message[@type=\"yarblemessage\" or @responseID=\"1234abcd\"]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-
-	logline("kxml.xml XPath inequality test\n");
-	searchlist = xml.parseXPath("/message[@order<6]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-	searchlist = xml.parseXPath("/message[@order>4]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-	searchlist = xml.parseXPath("/message[@order>=5]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-	searchlist = xml.parseXPath("/message[@order<=5]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-	searchlist = xml.parseXPath("/message[@order!=1]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-	searchlist = xml.parseXPath("/message[@order=5]/flags");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");
-*/
-	/*logline("kxml.xml XPath subnote match test\n");
-	searchlist = xml.parseXPath("/message[flags@tweak]");
-	assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
 }
 
 version(XML_main) {
