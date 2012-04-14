@@ -116,6 +116,18 @@ int icmp(R)(R s1, R s2) {
 	return cmp!(doCompare,R,R)(s1,s2);
 }
 
+unittest {
+	string a = "asdf";
+	string b = "AsDf";
+	string c = "asdfg";
+	logline("string icmp test\n");
+	assert(!.icmp(a,b));
+	assert(.icmp(a,c));
+	logline("custring icmp test\n");
+	assert(!.icmp(cast(custring)a,cast(custring)b));
+	assert(.icmp(cast(custring)a,cast(custring)c));
+}
+
 R find(R)(R haystack, R needle) if (isForwardRange!R) {
 	if (needle.empty()) {
 		return needle;
@@ -543,7 +555,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		// rip off name
 		R name = getWSToken(xsrc);
 		XmlPI!R newnode;
-		if (name[name.length-1] == '?') {
+		if (name.back == '?') {
 			// and we're at the end of the element
 			name = name[0..name.length-1];
 			newnode = (_docroot?_docroot.allocXmlPI:new XmlPI!R);
@@ -614,22 +626,22 @@ class XmlNode(R=string) if (isGoodType!R)
 		auto newnode = (_docroot?_docroot.allocXmlNode:new XmlNode!R);
 		newnode.setName(name);
 		xsrc = stripLeft(xsrc);
-		while(xsrc.length && xsrc[0] != '/' && xsrc[0] != '>') {
+		while(xsrc.length && xsrc.front != '/' && xsrc.front != '>') {
 			parseAttribute(newnode,xsrc);
 		}
 		// check for self-closing tag
 		parent.addChild(newnode);
-		if (xsrc[0] == '/') {
+		if (xsrc.front == '/') {
 			// strip off the / and go about business as normal
 			xsrc = stripLeft(xsrc[1..xsrc.length]);
 			// check for >
-			if (!xsrc.length || xsrc[0] != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
+			if (!xsrc.length || xsrc.front != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
 			xsrc = stripLeft(xsrc[1..xsrc.length]);
 			debug(xml)logline("self-closing tag!\n");
 			return;
 		} 
 		// check for >
-		if (!xsrc.length || xsrc[0] != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
+		if (!xsrc.length || xsrc.front != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
 		xsrc = xsrc[1..xsrc.length];
 		// don't rape whitespace unless requested
 		if (!preserveWS) xsrc = stripLeft(xsrc);
@@ -657,14 +669,14 @@ class XmlNode(R=string) if (isGoodType!R)
 			return 0;
 		}
 		R token;
-		if (xsrc[0] != '<') {
+		if (xsrc.front != '<') {
 			parseCData(parent,xsrc,preserveWS);
 			return 0;
 		} 
 		xsrc = xsrc[1..xsrc.length];
 		
 		// types of tags, gotta make sure we find the closing > (or ]]> in the case of ucdata)
-		switch(xsrc[0]) {
+		switch(xsrc.front) {
 		default:
 			// just a regular old tag
 			parseOpenTag(parent,xsrc,preserveWS);
@@ -706,9 +718,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	private R getWSToken(ref R input) {
 		input = stripLeft(input);
 		int i;
-		for(i=0;i<input.length && !isspace(input[i]) && input[i] != '>' && input[i] != '/' && input[i] != '<' && input[i] != '=' && input[i] != '!';i++){}
-		auto ret = input[0..i];
-		input = input[i..input.length];
+		auto ret = input.save;
+		for(i=0;!input.empty() && !isspace(input.front) && input.front != '>' && input.front != '/' && input.front != '<' && input.front != '=' && input.front != '!';i++,input.popFront){}
+		ret = ret[0..i];
 		if (!ret.length) {
 			throw new XmlError("Unable to parse token at: "~cast(string)input);
 		}
@@ -1525,7 +1537,64 @@ private dchar toHVal(char digit) {
 	return 0;
 }
 
+
+unittest {
+	string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
+	runTests(xmlstring);
+	runTests(cast(custring)xmlstring);
+}
+
+version(XML_main) {
+	void main(){}
+}
+
 version(unittest) {
+	void runTests(R)(R xmlstring) {
+		logline("Running "~R.stringof~" tests\n");
+		auto xml = readDocument(xmlstring);
+		xmlstring = xml.toXml;
+		// ensure that the string doesn't mutate after a second reading, it shouldn't
+		logline("kxml.xml test\n");
+		assert(readDocument(xmlstring).toXml == xmlstring);
+		logline("kxml.xml XPath test\n");
+		auto searchlist = xml.parseXPath(cast(R)"message/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		logline("kxml.xml deep XPath test\n");
+		searchlist = xml.parseXPath(cast(R)"//message//flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		logline("kxml.xml attribute match 'and' XPath test\n");
+		searchlist = xml.parseXPath(cast(R)"/message[@type=\"message\" and @responseID=\"1234abcd\"]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"message[@type=\"toaster\"]/flags");
+		assert(searchlist.length == 0);
+	
+		logline("kxml.xml attribute match 'or' XPath test\n");
+		searchlist = xml.parseXPath(cast(R)"/message[@type=\"message\" or @responseID=\"134abcd\"]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@type=\"yarblemessage\" or @responseID=\"1234abcd\"]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		logline("kxml.xml XPath inequality test\n");
+		searchlist = xml.parseXPath(cast(R)"/message[@order<6]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order>4]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order>=5]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order<=5]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order!=1]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)"/message[@order=5]/flags");
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+	
+		/*logline("kxml.xml XPath subnote match test\n");
+		searchlist = xml.parseXPath("/message[flags@tweak]");
+		assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
+	}
+
 	struct custring {
 		string data;
 		this(string assgn) {data = assgn;}
@@ -1589,61 +1658,5 @@ version(unittest) {
 		}
 		// End hashing functions
 	}
-
-	void runTests(R)(R xmlstring) {
-		logline("Running "~R.stringof~" tests\n");
-		auto xml = readDocument(xmlstring);
-		xmlstring = xml.toXml;
-		// ensure that the string doesn't mutate after a second reading, it shouldn't
-		logline("kxml.xml test\n");
-		assert(readDocument(xmlstring).toXml == xmlstring);
-		logline("kxml.xml XPath test\n");
-		auto searchlist = xml.parseXPath(cast(R)"message/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-	
-		logline("kxml.xml deep XPath test\n");
-		searchlist = xml.parseXPath(cast(R)"//message//flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-	
-		logline("kxml.xml attribute match 'and' XPath test\n");
-		searchlist = xml.parseXPath(cast(R)"/message[@type=\"message\" and @responseID=\"1234abcd\"]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-		searchlist = xml.parseXPath(cast(R)"message[@type=\"toaster\"]/flags");
-		assert(searchlist.length == 0);
-	
-		logline("kxml.xml attribute match 'or' XPath test\n");
-		searchlist = xml.parseXPath(cast(R)"/message[@type=\"message\" or @responseID=\"134abcd\"]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-		searchlist = xml.parseXPath(cast(R)"/message[@type=\"yarblemessage\" or @responseID=\"1234abcd\"]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-	
-		logline("kxml.xml XPath inequality test\n");
-		searchlist = xml.parseXPath(cast(R)"/message[@order<6]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-		searchlist = xml.parseXPath(cast(R)"/message[@order>4]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-		searchlist = xml.parseXPath(cast(R)"/message[@order>=5]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-		searchlist = xml.parseXPath(cast(R)"/message[@order<=5]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-		searchlist = xml.parseXPath(cast(R)"/message[@order!=1]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-		searchlist = xml.parseXPath(cast(R)"/message[@order=5]/flags");
-		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-	
-		/*logline("kxml.xml XPath subnote match test\n");
-		searchlist = xml.parseXPath("/message[flags@tweak]");
-		assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
-	}
-}
-
-unittest {
-	string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
-	runTests(xmlstring);
-	runTests(cast(custring)xmlstring);
-}
-
-version(XML_main) {
-	void main(){}
 }
 
