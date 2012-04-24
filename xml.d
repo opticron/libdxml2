@@ -175,10 +175,59 @@ template isGoodType(R)
 	enum bool isGoodType = is(typeof(
 	{
 		R r = void;
-		auto s = r[1 .. 2];
-		auto t = s ~ r;
-		static assert(isBidirectionalRange!(typeof(s)));
+		static assert(isBidirectionalRange!(typeof(r)));
+		static assert(isStringAssignable!(typeof(r)));
+		static assert(isSelfAssignable!(typeof(r)));
+		static assert(custSlicing!(typeof(r)));
+		static assert(hasStringCast!(typeof(r)));
+		static assert(hasConcat!(typeof(r)));
 		static assert(is(typeof(r.length) : ulong));
+	}));
+}
+
+template custSlicing(R)
+{
+	enum bool custSlicing = is(typeof(
+	{
+		R r = void;
+		auto s = r[1 .. 2];
+	}));
+}
+
+template hasStringCast(R)
+{
+	enum bool hasStringCast = is(typeof(
+	{
+		R r = void;
+		string s = to!string(r);
+	}));
+}
+
+template hasConcat(R)
+{
+	enum bool hasConcat = is(typeof(
+	{
+		R r = void;
+		r = r ~ r;
+	}));
+}
+
+template isStringAssignable(R)
+{
+	enum bool isStringAssignable = is(typeof(
+	{
+		R r = void;
+		string s = void;
+		r = s;
+	}));
+}
+
+template isSelfAssignable(R)
+{
+	enum bool isSelfAssignable = is(typeof(
+	{
+		R r = void;
+		r = r;
 	}));
 }
 
@@ -214,12 +263,12 @@ template isGoodType(R)
 auto readDocument(R)(R src, bool preserveWS=false)
 if (isGoodType!R)
 {
-	auto pointcpy = src;
+	auto pointcpy = src.save;
 	auto root = new XmlNode!R();
 	try {
 		root.addChildren(src,preserveWS);
 	} catch (XmlError e) {
-		logline("Caught exception from input string:\n"~cast(string)pointcpy~"\n");
+		logline("Caught exception from input string:\n"~to!string(pointcpy)~"\n");
 		throw e;
 	}
 	return root;
@@ -533,7 +582,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		// don't break xml whitespace specs unless requested
 		if (!preserveWS) token = stripRight(token);
 		xsrc = xsrc[slice..xsrc.length];
-		debug(xml)logline("I found cdata text: "~cast(string)token~"\n");
+		debug(xml)logline("I found cdata text: "~to!string(token)~"\n");
 		// DO NOT CHANGE THIS TO USE THE CONSTRUCTOR, BECAUSE THE CONSTRUCTOR IS FOR USER USE
 		auto cd = (_docroot?_docroot.allocCData:new CData!R);
 		cd._cdata = token;
@@ -549,8 +598,8 @@ class XmlNode(R=string) if (isGoodType!R)
 		token = strip(xsrc[0..slice]);
 		xsrc = xsrc[slice..xsrc.length];
 		xsrc.popFront();
-		debug(xml)logline("I found a closing tag (yikes):"~cast(string)token~"\n");
-		if (icmp(token, parent.getName()) != 0) throw new XmlError("Wrong close tag: "~cast(string)token~" for parent tag "~cast(string)parent.getName);
+		debug(xml)logline("I found a closing tag (yikes):"~to!string(token)~"\n");
+		if (icmp(token, parent.getName()) != 0) throw new XmlError("Wrong close tag: "~to!string(token)~" for parent tag "~to!string(parent.getName));
 	}
 
 	// rip off a xml processing instruction, like the ones that come at the beginning of xml documents
@@ -570,7 +619,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			return;
 		}
 		// rip off attributes while looking for ?>
-		debug(xml)logline("Got a "~cast(string)name~" XML processing instruction\n");
+		debug(xml)logline("Got a "~to!string(name)~" XML processing instruction\n");
 		newnode = (_docroot?_docroot.allocXmlPI:new XmlPI!R);
 		newnode.setName(name);
 		xsrc = stripLeft(xsrc);
@@ -578,7 +627,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			parseAttribute(newnode,xsrc);
 		}
 		// make sure that the ?> is there and rip it off
-		if (xsrc[0..2] != cast(R)"?>") throw new XmlError("Could not find the end to xml processing instruction "~cast(string)name);
+		if (xsrc[0..2] != cast(R)"?>") throw new XmlError("Could not find the end to xml processing instruction "~to!string(name));
 		popN(xsrc, 2);
 		parent.addChild(newnode);
 	}
@@ -592,7 +641,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		token = xsrc[0..slice];
 		xsrc = xsrc[slice..xsrc.length];
 		popN(xsrc, 3);
-		debug(xml)logline("I found cdata text: "~cast(string)token~"\n");
+		debug(xml)logline("I found cdata text: "~to!string(token)~"\n");
 		// DO NOT CHANGE THIS TO USE THE CONSTRUCTOR, BECAUSE THE CONSTRUCTOR IS FOR USER USE
 		auto cd = (_docroot?_docroot.allocCData:new CData!R);
 		cd._cdata = token;
@@ -630,7 +679,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		// rip off name
 		R name = getWSToken(xsrc);
 		// rip off attributes while looking for ?>
-		debug(xml)logline("Got a "~cast(string)name~" open tag\n");
+		debug(xml)logline("Got a "~to!string(name)~" open tag\n");
 		auto newnode = (_docroot?_docroot.allocXmlNode:new XmlNode!R);
 		newnode.setName(name);
 		xsrc = stripLeft(xsrc);
@@ -644,14 +693,14 @@ class XmlNode(R=string) if (isGoodType!R)
 			xsrc.popFront();
 			xsrc = stripLeft(xsrc);
 			// check for >
-			if (!xsrc.length || xsrc.front != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
+			if (!xsrc.length || xsrc.front != '>') throw new XmlError("Unable to find end of "~to!string(name)~" tag");
 			xsrc.popFront();
 			xsrc = stripLeft(xsrc);
 			debug(xml)logline("self-closing tag!\n");
 			return;
 		} 
 		// check for >
-		if (!xsrc.length || xsrc.front != '>') throw new XmlError("Unable to find end of "~cast(string)name~" tag");
+		if (!xsrc.length || xsrc.front != '>') throw new XmlError("Unable to find end of "~to!string(name)~" tag");
 		xsrc.popFront();
 		// don't rape whitespace unless requested
 		if (!preserveWS) xsrc = stripLeft(xsrc);
@@ -665,7 +714,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		// make sure we found our closing tag
 		// this is where we can get sloppy for stream parsing
 		// throw a missing closing tag exception
-		if (!ret) throw new XmlError("Missing end tag for "~cast(string)name);
+		if (!ret) throw new XmlError("Missing end tag for "~to!string(name));
 	}
 
 	// returns everything after the first node TREE (a node can be text as well)
@@ -674,7 +723,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		int ret = 0;
 		// this has been removed from normal code flow to be XML std compliant, preserve whitespace
 		if (!preserveWS) xsrc = stripLeft(xsrc); 
-		debug(xml)logline("Parsing text: "~cast(string)xsrc~"\n");
+		debug(xml)logline("Parsing text: "~to!string(xsrc)~"\n");
 		if (!xsrc.length) {
 			return 0;
 		}
@@ -733,7 +782,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		for(i=0;!input.empty() && !isspace(input.front) && input.front != '>' && input.front != '/' && input.front != '<' && input.front != '=' && input.front != '!';i++,input.popFront()){}
 		ret = ret[0..i];
 		if (!ret.length) {
-			throw new XmlError("Unable to parse token at: "~cast(string)input);
+			throw new XmlError("Unable to parse token at: "~to!string(input));
 		}
 		return ret;
 	}
@@ -766,8 +815,8 @@ class XmlNode(R=string) if (isGoodType!R)
 		R value,name = ripName(attrstr);
 		attrstr = stripLeft(attrstr);
 		// check for = to make sure the attribute string is kosher
-		if (attrstr.empty()) throw new XmlError("Unexpected end of attribute string near "~cast(string)name);
-		if (attrstr.front != '=') throw new XmlError("Missing = in attribute string with name "~cast(string)name);
+		if (attrstr.empty()) throw new XmlError("Unexpected end of attribute string near "~to!string(name));
+		if (attrstr.front != '=') throw new XmlError("Missing = in attribute string with name "~to!string(name));
 		// rip off =
 		attrstr.popFront();
 		attrstr = stripLeft(attrstr);
@@ -775,12 +824,12 @@ class XmlNode(R=string) if (isGoodType!R)
 			if (attrstr.front == '"' || attrstr.front == '\'') {
 				value = ripValue(attrstr);
 			} else {
-				throw new XmlError("Unquoted attribute value for "~cast(string)xml.getName~", starting at: "~cast(string)attrstr);
+				throw new XmlError("Unquoted attribute value for "~to!string(xml.getName)~", starting at: "~to!string(attrstr));
 			}
 		} else {
-			throw new XmlError("Unexpected end of input for attribute "~cast(string)name~" in node "~cast(string)xml.getName);
+			throw new XmlError("Unexpected end of input for attribute "~to!string(name)~" in node "~to!string(xml.getName));
 		}
-		debug(xml)logline("Got attr "~cast(string)name~" and value \""~cast(string)value~"\"\n");
+		debug(xml)logline("Got attr "~to!string(name)~" and value \""~to!string(value)~"\"\n");
 		xml._attributes[name] = value;
 		attrstr = stripLeft(attrstr);
 	}
@@ -790,7 +839,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	XmlNode!R[] parseXPath(R xpath,bool caseSensitive = false) {
 		// rip off the leading / if it's there and we're not looking for a deep path
 		if (!isDeepPath(xpath) && !xpath.empty() && xpath.front == '/') xpath.popFront();
-		debug(xpath)logline("Got xpath "~cast(string)xpath~" in node "~cast(string)getName~"\n");
+		debug(xpath)logline("Got xpath "~to!string(xpath)~" in node "~to!string(getName)~"\n");
 		R truncxpath;
 		auto nextnode = getNextNode(xpath,truncxpath);
 		R attrmatch;
@@ -800,19 +849,19 @@ class XmlNode(R=string) if (isGoodType!R)
 			// rip out attribute string
 			attrmatch = nextnode[offset..nextnode.length];
 			nextnode = nextnode[0..offset];
-			debug(xpath)logline("Found attribute chunk: "~cast(string)attrmatch~"\n");
+			debug(xpath)logline("Found attribute chunk: "~to!string(attrmatch)~"\n");
 		}
-		debug(xpath)logline("Looking for "~cast(string)nextnode~"\n");
+		debug(xpath)logline("Looking for "~to!string(nextnode)~"\n");
 		XmlNode[]retarr;
 		// search through the children to see if we have a direct match on the next node
 		if (!nextnode.length) {
 			// we were searching for nodes, and this is one
-			debug(xpath)logline("Found a node we want! name is: "~cast(string)getName~"\n");
+			debug(xpath)logline("Found a node we want! name is: "~to!string(getName)~"\n");
 			retarr ~= this;
 		} else foreach(child;getChildren) if (!child.isCData && !child.isXmlComment && !child.isXmlPI && child.matchXPathPredicate(attrmatch,caseSensitive)) {
 			if (!nextnode.length || (caseSensitive && child.getName == nextnode) || (!caseSensitive && !icmp(child.getName(), nextnode))) {
 				// child that matches the search string, pass on the truncated string
-				debug(xpath)logline("Sending "~cast(string)truncxpath~" to "~cast(string)child.getName~"\n");
+				debug(xpath)logline("Sending "~to!string(truncxpath)~" to "~to!string(child.getName)~"\n");
 				retarr ~= child.parseXPath(truncxpath,caseSensitive);
 			}
 		}
@@ -827,7 +876,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	private bool matchXPathPredicate(R attrstr,bool caseSen) {
-		debug(xpath)logline("matching attribute string "~cast(string)attrstr~"\n");
+		debug(xpath)logline("matching attribute string "~to!string(attrstr)~"\n");
 		// strip off the encasing [] if it exists
 		if (!attrstr.length) {
 			return true;
@@ -837,7 +886,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			attrstr.popBack();
 		} else if (attrstr.front == '[' || attrstr.back == ']') {
 			// this seems to be malformed
-			throw new XPathError("got malformed attribute match "~cast(string)attrstr~"\n");
+			throw new XPathError("got malformed attribute match "~to!string(attrstr)~"\n");
 		}
 		// rip apart the xpath predicate assuming it's node and attribute matches
 		R[]attrlist;
@@ -864,21 +913,21 @@ class XmlNode(R=string) if (isGoodType!R)
 		// tack the last one on
 		attrlist ~= attrstr[lslice..attrstr.length];
 		// length must be odd, otherwise the string is jank
-		if (!(attrlist.length%2)) throw new XPathError("Encountered a janky predicate: "~cast(string)attrstr);
+		if (!(attrlist.length%2)) throw new XPathError("Encountered a janky predicate: "~to!string(attrstr));
 		// verify that odd numbers are "and" or "or"
 		foreach (j,attr;attrlist) if (j%2 && attr != cast(R)"and" && attr != cast(R)"or") {
-			throw new XPathError("Encountered consecutive terms not separated by \"and\" or \"or\" starting at: "~cast(string)attr);
+			throw new XPathError("Encountered consecutive terms not separated by \"and\" or \"or\" starting at: "~to!string(attr));
 		} else if (!(j%2) && (attr == cast(R)"and" || attr == cast(R)"or")) {
-			throw new XPathError("Encountered consecutive joining terms (\"and\" or \"or\") in: "~cast(string)attrstr);
+			throw new XPathError("Encountered consecutive joining terms (\"and\" or \"or\") in: "~to!string(attrstr));
 		}
 		bool[]res;
 		res.length = attrlist.length;
 		int numOrdTerms = 0;
 		debug(xpath)foreach (attr;attrlist) {
-			logline("Term: "~cast(string)attr~"\n");
+			logline("Term: "~to!string(attr)~"\n");
 		}
 		foreach (j,attr;attrlist) if (!(j%2)) {
-			debug(xpath)logline("matching on "~cast(string)attr~"\n");
+			debug(xpath)logline("matching on "~to!string(attr)~"\n");
 			// check to see if we're doing an attribute match
 			// there should be NO zero-length strings this far in
 			if (attr.front == '@') {
@@ -901,12 +950,12 @@ class XmlNode(R=string) if (isGoodType!R)
 						attr.popFront();
 						attr = stripLeft(attr);
 					} else {
-						throw new XPathError("Could not determine comparator at: "~cast(string)attr);
+						throw new XPathError("Could not determine comparator at: "~to!string(attr));
 					}
 					secelem = attr.save;
 					if (!secelem.empty()) secelem.popFront();
-					if (secelem.empty() && !isNumeric(cast(string)[attr.front])) { 
-						throw new XPathError("Badly formed XPath query: Non-numeric comparands must be quoted ("~cast(string)attr~")");
+					if (secelem.empty() && !isNumeric(to!string([attr.front]))) { 
+						throw new XPathError("Badly formed XPath query: Non-numeric comparands must be quoted ("~to!string(attr)~")");
 					}
 					// strip off quotes if necessary
 					if (attr.back == '"' && attr.front == '"') {
@@ -914,29 +963,29 @@ class XmlNode(R=string) if (isGoodType!R)
 						attr.popBack();
 						verbatim = true;
 					} else if (attr.back == '"' || attr.front == '"') {
-						throw new XPathError("Badly formed XPath query: Missing quote ("~cast(string)attr~")");
+						throw new XPathError("Badly formed XPath query: Missing quote ("~to!string(attr)~")");
 					}
 				}
 				// make sure that if we pulled a comparator, there's something to compare on the other side
 				if (comparator.length && !attr.length) throw new XPathError("Got a comparator without anything to compare");
 				if (!hasAttribute(attrname)) {
-					debug(xpath)logline("could not find "~cast(string)attrname~"\n");
+					debug(xpath)logline("could not find "~to!string(attrname)~"\n");
 					res[j] = false;
 					continue;
 				}
 				if (comparator.length) {
-					bool lres,neg = false,i1num = isNumeric(cast(string)getAttribute(attrname)),i2num = isNumeric(cast(string)attr);
+					bool lres,neg = false,i1num = isNumeric(to!string(getAttribute(attrname))),i2num = isNumeric(to!string(attr));
 					double i1,i2;
 					// currently ignoring verbatim in this section of code
 					// we can't compare non-numerics without quotes
 					if (!verbatim && (!i1num || !i2num)) {
 						//res[j] = false;
 						//continue;
-						throw new XPathError("Badly formed XPath query: Non-numeric comparands must be quoted ("~cast(string)attr~")");
+						throw new XPathError("Badly formed XPath query: Non-numeric comparands must be quoted ("~to!string(attr)~")");
 					}
 					// get numeric equivalents
-					if (i1num) i1 = to!double(cast(string)getAttribute(attrname));
-					if (i2num) i2 = to!double(cast(string)attr);
+					if (i1num) i1 = to!double(to!string(getAttribute(attrname)));
+					if (i2num) i2 = to!double(to!string(attr));
 					if (comparator.front == '<') {
 						if (i1num && i2num) {
 							lres = (i1 < i2);
@@ -954,7 +1003,7 @@ class XmlNode(R=string) if (isGoodType!R)
 					if (comparator.back == '=') {
 						if (verbatim) {
 							if ((getAttribute(attrname) != attr && caseSen) || (icmp(getAttribute(attrname), attr) != 0 && !caseSen)) {
-								debug(xpath)logline("search value "~cast(string)attr~" did not match attribute value "~cast(string)getAttribute(attrname)~"\n");
+								debug(xpath)logline("search value "~to!string(attr)~" did not match attribute value "~to!string(getAttribute(attrname))~"\n");
 								lres = false;
 							} else {
 								lres = true;
@@ -1431,7 +1480,7 @@ class XmlDocument(R=string) : XmlNode!R {
 		try {
 			addChildren(constring,preserveWS);
 		} catch (XmlError e) {
-			logline("Caught exception from input string:\n"~cast(string)pointcpy~"\n");
+			logline("Caught exception from input string:\n"~to!string(pointcpy)~"\n");
 			throw e;
 		}
 	}
@@ -1511,33 +1560,33 @@ class XmlDocument(R=string) : XmlNode!R {
 
 /// Encode characters such as &, <, >, etc. as their xml/html equivalents
 auto xmlEncode(R)(R src) {
-        src = replace(cast(string)src, "&", "&amp;");
-        src = replace(cast(string)src, "<", "&lt;");
-        src = replace(cast(string)src, ">", "&gt;");
-        src = replace(cast(string)src, "\"", "&quot;");
-        src = replace(cast(string)src, "'", "&apos;");
+        src = replace(to!string(src), "&", "&amp;");
+        src = replace(to!string(src), "<", "&lt;");
+        src = replace(to!string(src), ">", "&gt;");
+        src = replace(to!string(src), "\"", "&quot;");
+        src = replace(to!string(src), "'", "&apos;");
         return src;
 }
 
 /// Convert xml-encoded special characters such as &amp;amp; back to &amp;.
 auto xmlDecode(R)(R src) {
-        src = replace(cast(string)src, "&lt;",  "<");
-        src = replace(cast(string)src, "&gt;",  ">");
-        src = replace(cast(string)src, "&apos;", "'");
-        src = replace(cast(string)src, "&quot;",  "\"");
+        src = replace(to!string(src), "&lt;",  "<");
+        src = replace(to!string(src), "&gt;",  ">");
+        src = replace(to!string(src), "&apos;", "'");
+        src = replace(to!string(src), "&quot;",  "\"");
 	// take care of decimal character entities
-	src = regrep(cast(string)src,"&#\\d{1,8};",(string m) {
+	src = regrep(to!string(src),"&#\\d{1,8};",(string m) {
 		auto cnum = m[2..m.length-1];
-		dchar dnum = cast(dchar)to!(int)(cnum);
+		dchar dnum = cast(dchar)to!int(cnum);
 		return quickUTF8(dnum);
 	});
 	// take care of hex character entities
-	src = regrep(cast(string)src,"&#[xX][0-9a-fA-F]{1,8};",(string m) {
+	src = regrep(to!string(src),"&#[xX][0-9a-fA-F]{1,8};",(string m) {
 		auto cnum = m[3..$-1];
 		dchar dnum = hex2dchar(cnum);
 		return quickUTF8(dnum);
 	});
-        src = replace(cast(string)src, "&amp;", "&");
+        src = replace(to!string(src), "&amp;", "&");
         return src;
 }
 
@@ -1547,7 +1596,7 @@ private auto quickUTF8(dchar dachar) {
 	foreach(char r;[dachar]) {
 		ret ~= r;
 	}
-	return cast(string)ret;
+	return to!string(ret);
 }
 
 // convert a hex string to a raw dchar
@@ -1627,19 +1676,16 @@ version(unittest) {
 		searchlist = xml.parseXPath(cast(R)"/message[@order=5]/flags");
 		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
 	
-		/*logline("kxml.xml XPath subnote match test\n");
+		/*logline("kxml.xml XPath subnode match test\n");
 		searchlist = xml.parseXPath("/message[flags@tweak]");
 		assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
 	}
 
 	struct custring {
 		string data;
-		// XXX need to test for this, but should't need it
-		void opAssign(string assgn) {data = assgn;}
-		// XXX need to test for this, but should't need it
-		string opCast(string)() {return data;}
-		// XXX need to test for this
 		void opAssign(custring assgn) {data = assgn.data;}
+		// XXX should't need it?
+		void opAssign(string assgn) {data = assgn;}
 
 		// XXX does this have something in ranges?
 		custring opBinary(string op)(custring b) {
@@ -1657,13 +1703,13 @@ version(unittest) {
 		}
 		// End hasLength functions
 
-		// Start hasSlicing functions
+		// Start custSlicing functions
 		custring opSlice(size_t a, size_t b) {
 			custring n;
 			n.data = data[a..b];
 			return n;
 		}
-		// End hasSlicing functions
+		// End custSlicing functions
 
 		// Start InputRange functions
 		bool empty() const {return !data.length;}
