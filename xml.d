@@ -842,14 +842,14 @@ class XmlNode(R=string) if (isGoodType!R)
 		debug(xpath)logline("Got xpath "~to!string(xpath)~" in node "~to!string(getName)~"\n");
 		R truncxpath;
 		auto nextnode = getNextNode(xpath,truncxpath);
-		R attrmatch;
+		R predmatch;
 		// XXX need to be able to split the attribute match off even when it doesn't have [] around it
 		ptrdiff_t offset = nextnode.length - find(nextnode, cast(R)"[").length;
 		if (offset != nextnode.length) {
 			// rip out attribute string
-			attrmatch = nextnode[offset..nextnode.length];
+			predmatch = nextnode[offset..nextnode.length];
 			nextnode = nextnode[0..offset];
-			debug(xpath)logline("Found attribute chunk: "~to!string(attrmatch)~"\n");
+			debug(xpath)logline("Found predicate chunk: "~to!string(predmatch)~"\n");
 		}
 		debug(xpath)logline("Looking for "~to!string(nextnode)~"\n");
 		XmlNode[]retarr;
@@ -858,7 +858,13 @@ class XmlNode(R=string) if (isGoodType!R)
 			// we were searching for nodes, and this is one
 			debug(xpath)logline("Found a node we want! name is: "~to!string(getName)~"\n");
 			retarr ~= this;
-		} else foreach(child;getChildren) if (!child.isCData && !child.isXmlComment && !child.isXmlPI && child.matchXPathPredicate(attrmatch,caseSensitive)) {
+		} else if (nextnode.front == '@') {
+			if( matchXPathPredicate(nextnode, caseSensitive)) {
+				auto attr = getWSToken(nextnode);
+				attr.popFront();
+				retarr ~= new CData!R(getAttribute(attr));
+			}
+		} else foreach(child;getChildren) if (!child.isCData && !child.isXmlComment && !child.isXmlPI && child.matchXPathPredicate(predmatch,caseSensitive)) {
 			if (!nextnode.length || (caseSensitive && child.getName == nextnode) || (!caseSensitive && !icmp(child.getName(), nextnode))) {
 				// child that matches the search string, pass on the truncated string
 				debug(xpath)logline("Sending "~to!string(truncxpath)~" to "~to!string(child.getName)~"\n");
@@ -875,152 +881,139 @@ class XmlNode(R=string) if (isGoodType!R)
 		return retarr;
 	}
 
-	private bool matchXPathPredicate(R attrstr,bool caseSen) {
-		debug(xpath)logline("matching attribute string "~to!string(attrstr)~"\n");
+	private bool matchXPathPredicate(R predstr,bool caseSen) {
+		debug(xpath)logline("matching predicate string "~to!string(predstr)~"\n");
 		// strip off the encasing [] if it exists
-		if (!attrstr.length) {
+		if (!predstr.length) {
 			return true;
 		}
-		if (attrstr.front == '[' && attrstr.back == ']') {
-			attrstr.popFront();
-			attrstr.popBack();
-		} else if (attrstr.front == '[' || attrstr.back == ']') {
+		if (predstr.front == '[' && predstr.back == ']') {
+			predstr.popFront();
+			predstr.popBack();
+		} else if (predstr.front == '[' || predstr.back == ']') {
 			// this seems to be malformed
-			throw new XPathError("got malformed attribute match "~to!string(attrstr)~"\n");
+			throw new XPathError("got malformed predicate match "~to!string(predstr)~"\n");
 		}
 		// rip apart the xpath predicate assuming it's node and attribute matches
-		R[]attrlist;
+		R[]predlist;
 		// basically, we're splitting on " and " and " or ", but while respecting []
 		int bcount = 0, i = 0;
 		ptrdiff_t lslice = 0;
-		R tmpattrstr = attrstr;
-		//foreach (i,c;attrstr) {
-		while(!tmpattrstr.empty()) {
-			auto c = tmpattrstr.front;
-			if (c == '[') {
+		//foreach (i,c;predstr) {
+		R tmpstr = predstr.save;
+		for( dchar quote = '\0'; !tmpstr.empty(); ) {
+			auto c = tmpstr.front;
+			if( quote != '\0' ) {
+				if( quote == c ) {
+					quote = '\0';
+				}
+			} else if (c == '\'' || c == '"' ) {
+				quote = c;
+			} else if (c == '[') {
 				bcount++;
 			} else if (c == ']') {
 				bcount--;
 			} else if (bcount == 0 && c == ' ') {
 				if (i != lslice) {
-					attrlist ~= attrstr[lslice..i];
+					predlist ~= predstr[lslice..i];
 				}
 				lslice = i+1;
 			}
 			i++;
-			tmpattrstr.popFront();
+			tmpstr.popFront();
 		}
 		// tack the last one on
-		attrlist ~= attrstr[lslice..attrstr.length];
+		predlist ~= predstr[lslice..predstr.length];
 		// length must be odd, otherwise the string is jank
-		if (!(attrlist.length%2)) throw new XPathError("Encountered a janky predicate: "~to!string(attrstr));
+		if (!(predlist.length%2)) throw new XPathError("Encountered a janky predicate: "~to!string(predstr));
 		// verify that odd numbers are "and" or "or"
-		foreach (j,attr;attrlist) if (j%2 && attr != cast(R)"and" && attr != cast(R)"or") {
+		foreach (j,attr;predlist) if (j%2 && attr != cast(R)"and" && attr != cast(R)"or") {
 			throw new XPathError("Encountered consecutive terms not separated by \"and\" or \"or\" starting at: "~to!string(attr));
 		} else if (!(j%2) && (attr == cast(R)"and" || attr == cast(R)"or")) {
-			throw new XPathError("Encountered consecutive joining terms (\"and\" or \"or\") in: "~to!string(attrstr));
+			throw new XPathError("Encountered consecutive joining terms (\"and\" or \"or\") in: "~to!string(predstr));
 		}
 		bool[]res;
-		res.length = attrlist.length;
+		res.length = predlist.length;
 		int numOrdTerms = 0;
-		debug(xpath)foreach (attr;attrlist) {
-			logline("Term: "~to!string(attr)~"\n");
+		debug(xpath)foreach (pred;predlist) {
+			logline("Term: "~to!string(pred)~"\n");
 		}
-		foreach (j,attr;attrlist) if (!(j%2)) {
-			debug(xpath)logline("matching on "~to!string(attr)~"\n");
+		foreach (j,pred;predlist) if (!(j%2)) {
+			debug(xpath)logline("matching on "~to!string(pred)~"\n");
+			bool isattr   = false;		// is elem1 @attribute
+			bool verbatim = false;		// is elem2 quoted string
+			R elem1;			// Left of comparator
+			R comparator;			// null, ">","<","=", ">=","<=","!="
+			R elem2;			// right of comparator
+
+			if (pred.front == '@') {
+				isattr = true;
+				pred.popFront();
+			}
+			// TODO XXX check elem1/elem2 is an XPath func()
+			elem1 = getWSToken(pred);
+			pred = stripLeft(pred);
+			// if there is still data in pred, it's time to look for a comparison operator
+			if (pred.length) {
+				// figure out what comparison needs to be done
+				auto secelem = pred.save;
+				if (!secelem.empty()) secelem.popFront();
+				if (!secelem.empty() && (pred.front == '<' || pred.front == '>' || pred.front == '!') && secelem.front == '=') {
+					comparator = pred[0..2];
+					popN(pred, 2);
+					pred = stripLeft(pred);
+				} else if (pred.front == '<' || pred.front == '>' || pred.front == '=') {
+					comparator = pred[0..1];
+					pred.popFront();
+					pred = stripLeft(pred);
+				} else {
+					throw new XPathError("Could not determine comparator at: "~to!string(pred));
+				}
+				secelem = pred.save;
+				if (!secelem.empty()) secelem.popFront();
+				if (secelem.empty() && !isNumeric(to!string([pred.front]))) { 
+					throw new XPathError("Badly formed XPath query: Non-numeric comparands must be quoted ("~to!string(pred)~")");
+				}
+				// strip off quotes if necessary
+				if (pred.back == '"' && pred.front == '"') {
+					pred.popFront();
+					pred.popBack();
+					verbatim = true;
+				} else if (pred.back == '"' || pred.front == '"') {
+					throw new XPathError("Badly formed XPath query: Missing quote ("~to!string(pred)~")");
+				}
+			}
+			elem2 = pred.save;
 			// check to see if we're doing an attribute match
 			// there should be NO zero-length strings this far in
-			if (attr.front == '@') {
-				attr.popFront();
-				R comparator;
-				auto attrname = getWSToken(attr);
-				bool verbatim = false;
-				attr = stripLeft(attr);
-				// if there is still data in attr, it's time to look for a comparison operator
-				if (attr.length) {
-					// figure out what comparison needs to be done
-					auto secelem = attr.save;
-					if (!secelem.empty()) secelem.popFront();
-					if (!secelem.empty() && (attr.front == '<' || attr.front == '>' || attr.front == '!') && secelem.front == '=') {
-						comparator = attr[0..2];
-						popN(attr, 2);
-						attr = stripLeft(attr);
-					} else if (attr.front == '<' || attr.front == '>' || attr.front == '=') {
-						comparator = attr[0..1];
-						attr.popFront();
-						attr = stripLeft(attr);
-					} else {
-						throw new XPathError("Could not determine comparator at: "~to!string(attr));
-					}
-					secelem = attr.save;
-					if (!secelem.empty()) secelem.popFront();
-					if (secelem.empty() && !isNumeric(to!string([attr.front]))) { 
-						throw new XPathError("Badly formed XPath query: Non-numeric comparands must be quoted ("~to!string(attr)~")");
-					}
-					// strip off quotes if necessary
-					if (attr.back == '"' && attr.front == '"') {
-						attr.popFront();
-						attr.popBack();
-						verbatim = true;
-					} else if (attr.back == '"' || attr.front == '"') {
-						throw new XPathError("Badly formed XPath query: Missing quote ("~to!string(attr)~")");
-					}
-				}
-				// make sure that if we pulled a comparator, there's something to compare on the other side
-				if (comparator.length && !attr.length) throw new XPathError("Got a comparator without anything to compare");
-				if (!hasAttribute(attrname)) {
-					debug(xpath)logline("could not find "~to!string(attrname)~"\n");
+			if ( isattr ) {
+				if (!hasAttribute(elem1)) {
+					debug(xpath)logline("could not find attr "~to!string(elem1)~"\n");
 					res[j] = false;
 					continue;
 				}
-				if (comparator.length) {
-					bool lres,neg = false,i1num = isNumeric(to!string(getAttribute(attrname))),i2num = isNumeric(to!string(attr));
-					double i1,i2;
-					// currently ignoring verbatim in this section of code
-					// we can't compare non-numerics without quotes
-					if (!verbatim && (!i1num || !i2num)) {
-						//res[j] = false;
-						//continue;
-						throw new XPathError("Badly formed XPath query: Non-numeric comparands must be quoted ("~to!string(attr)~")");
-					}
-					// get numeric equivalents
-					if (i1num) i1 = to!double(to!string(getAttribute(attrname)));
-					if (i2num) i2 = to!double(to!string(attr));
-					if (comparator.front == '<') {
-						if (i1num && i2num) {
-							lres = (i1 < i2);
-						} else {
-							lres = (getAttribute(attrname) < attr);
-						}
-					} else if (comparator.front == '>') {
-						if (i1num && i2num) {
-							lres = (i1 > i2);
-						} else {
-							lres = (getAttribute(attrname) > attr);
-						}
-					} else if (comparator.front == '!') neg = true;
-					// check to see if equality is also called for
-					if (comparator.back == '=') {
-						if (verbatim) {
-							if ((getAttribute(attrname) != attr && caseSen) || (icmp(getAttribute(attrname), attr) != 0 && !caseSen)) {
-								debug(xpath)logline("search value "~to!string(attr)~" did not match attribute value "~to!string(getAttribute(attrname))~"\n");
-								lres = false;
-							} else {
-								lres = true;
-							}
-						} else {
-							lres |= (i1 == i2);
-						}
-						if (neg) lres = !lres;
-					}
-					res[j] = lres;
+				if( comparator.length == 0 ) {
+					// Just check for existance
+					res[j] = true;
 					continue;
 				}
-				res[j] = true;
-				continue;
+				res[j] = compareXPathPredicate( elem1, comparator, elem2, getAttribute(elem1), caseSen );
 			}
+			else if (true) {
+				// assume elem1 is a tag
+				//if (!comparator.length || !elem2.length) throw new XPathError("Is this really an Error?");
+				foreach(child;getChildren) { 
+					if( child.isCData || child.isXmlComment || child.isXmlPI || child.getName != elem1 )
+						continue;
+				
+					if( compareXPathPredicate( elem1, comparator, elem2, child.getCData, caseSen )) {
+						res[j] = true;
+						break;
+					}
+				}
+			}				
 			// XXX take care of other types of matches other than attribute matches
-		} else if (attr == cast(R)"or") {
+		} else if (pred == cast(R)"or") {
 			numOrdTerms++;
 		}
 		// collect "and" terms into "or" groups
@@ -1029,9 +1022,9 @@ class XmlNode(R=string) if (isGoodType!R)
 		ordTerms[0] = res[0];
 		debug(xpath)logline("res[0]="~to!(string)(res[0])~"\n");
 		numOrdTerms = 0; // we're using this as current position, now
-		foreach (j,attr;attrlist) if (j%2) {
+		foreach (j,attr;predlist) if (j%2) {
 			if (attr == cast(R)"and") {
-				debug(xpath)logline("combining anded terms on ord term "~to!(string)(numOrdTerms)~" and i="~to!(string)(j)~" with res.length="~to!(string)(res.length)~" and attrlist.length="~to!(string)(attrlist.length)~"\n");
+				debug(xpath)logline("combining anded terms on ord term "~to!(string)(numOrdTerms)~" and i="~to!(string)(j)~" with res.length="~to!(string)(res.length)~" and predlist.length="~to!(string)(predlist.length)~"\n");
 				ordTerms[numOrdTerms] &= res[j+1];
 				debug(xpath)logline("res["~to!(string)(j+1)~"]="~to!(string)(res[j+1])~"\n");
 			} else if (attr == cast(R)"or") {
@@ -1047,7 +1040,59 @@ class XmlNode(R=string) if (isGoodType!R)
 		debug(xpath)logline("Ended up with "~to!(string)(ret)~"\n");
 		return ret;
 	}
-	
+
+	private bool compareXPathPredicate( R elem1, R comparator, R elem2, R elem1value, bool caseSen )
+	{
+		// make sure that if we pulled a comparator, there's something to compare on the other side
+		if (comparator.length && !elem2.length) throw new XPathError("Got a comparator without anything to compare");
+		if (comparator.length) {
+			bool lres,i1num = isNumeric(to!string(elem1value)),i2num = isNumeric(to!string(elem2));
+			if (comparator.front == '<' || comparator.front == '>') {
+				// Must be numeric
+				if( !i2num )
+					throw new XPathError("Badly formed XPath query: comparator '"~to!string(comparator)~"' requires a numeric operand Not ("~to!string(elem2)~")");
+				if( !i1num ) {
+					return false;
+				}
+			
+				// get numeric equivalents
+				double i1 = to!double(to!string(elem1value));
+				double i2 = to!double(to!string(elem2));
+
+				if (comparator.front == '<') {
+					lres = i1 < i2;
+				} else /*if (comparator.front == '>')*/ {
+					lres = i1 > i2;
+				}
+				// check to see if equality is also called for
+				if (comparator.back == '=') {
+					lres |= (i1 == i2);
+				}
+			} else {
+				bool neg = false;
+				if (comparator.front == '!') neg = true;
+
+				if( !i1num || !i2num ) {
+					if ((elem1value != elem2 && caseSen) || (icmp(elem1value, elem2) != 0 && !caseSen)) {
+						debug(xpath)logline("search value "~to!string(elem2)~" did not match attribute value "~to!string(elem1value)~"\n");
+						lres = false;
+					} else {
+						lres = true;
+					}
+				} else {
+					// get numeric equivalents
+					double i1 = to!double(to!string(elem1value));
+					double i2 = to!double(to!string(elem2));
+					lres = (i1 == i2);
+				}
+				if (neg) lres = !lres;
+			}
+			return lres;
+		}
+		return false;
+	}
+
+
 	private bool isDeepPath(R xpath) {
 		// check to see if we're currently searching a deep path
 		auto secelem = xpath.save;
@@ -1440,6 +1485,7 @@ class XmlComment(R=string) : XmlNode!R {
   *--------------------------
   */
 public int prealloc = 50;
+///ditto
 class XmlDocument(R=string) : XmlNode!R {
 	// this should inherit the reset and toXml that we want
 	protected XmlNode!R[]xmlNodes;
@@ -1628,6 +1674,21 @@ unittest {
 	string xmlstring = "<message responseID=\"1234abcd\" text=\"weather 12345\" type=\"message\" order=\"5\"><flags>triggered</flags><flags>targeted</flags></message>";
 	runTests(xmlstring);
 	runTests(cast(custring)xmlstring);
+
+	string xmlstring2 =
+	`<table class="table1">
+	<tr>         <th>URL </th><td><a href="path1/path2">Link 1.1</a></td></tr>
+	<tr ab="two"><th>Head</th><td>Text 1.2</td></tr>
+	<tr ab="4">  <th>Head</th><td>Text 1.3</td></tr>
+	</table>
+	<table class="table2">
+	<tr>         <th>URL </th><td><a href="path1/path2">Link 2.1</a></td></tr>
+	<tr ab="six"><th>Head</th><td>Text 2.2</td></tr>
+	<tr ab="9">  <th>Head</th><td>Text 2.3</td></tr>
+	</table>`;
+
+	runTests2(xmlstring2);
+	runTests2(cast(custring)xmlstring2);
 }
 
 version(XML_main) {
@@ -1675,10 +1736,53 @@ version(unittest) {
 		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
 		searchlist = xml.parseXPath(cast(R)"/message[@order=5]/flags");
 		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
-	
+
+		logline("kxml.xml XPath ??? tests\n");
+		searchlist = xml.parseXPath(cast(R)`//@text`);
+		assert(searchlist.length == 1 && searchlist[0].getCData == cast(R)"weather 12345");
+		searchlist = xml.parseXPath(cast(R)`/message[flags="triggered" and flags="targeted"]/@order`);
+		assert(searchlist.length == 1 && searchlist[0].getCData == cast(R)"5");
+		searchlist = xml.parseXPath(cast(R)`/message[@order<6 and flags="triggered"]/flags`);
+		assert(searchlist.length == 2 && searchlist[0].getName == cast(R)"flags");
+		searchlist = xml.parseXPath(cast(R)`/message[@order<6 and flags="fail"]/flags`);
+		assert(searchlist.length == 0);
+
+
 		/*logline("kxml.xml XPath subnode match test\n");
 		searchlist = xml.parseXPath("/message[flags@tweak]");
 		assert(searchlist.length == 2 && searchlist[0].getName == "flags");*/
+	}
+
+	void runTests2(R)(R xmlstring) {
+		logline("Running More tests\n");
+		auto xml = readDocument(xmlstring);
+
+		logline("kxml.xml XPath no-match tests\n");
+		auto
+		searchlist = xml.parseXPath(cast(R)`//ab`);
+		assert(searchlist.length == 0);
+		searchlist = xml.parseXPath(cast(R)`//ab=9`);		// Should this throw?
+		assert(searchlist.length == 0);
+		searchlist = xml.parseXPath(cast(R)`//td="Text2.2"`);	// Should this throw?
+		assert(searchlist.length == 0);
+		searchlist = xml.parseXPath(cast(R)`//tr[ab<=7]/td`);
+		assert(searchlist.length == 0);
+
+		logline("kxml.xml XPath attr tests\n");
+		searchlist = xml.parseXPath(cast(R)`//@ab`);
+		assert(searchlist.length == 4);
+		searchlist = xml.parseXPath(cast(R)`//@ab<=7`);
+		assert(searchlist.length == 1);
+		searchlist = xml.parseXPath(cast(R)`//table[@class!="table2"]//@ab`);
+		assert(searchlist.length == 2);
+//		searchlist = xml.parseXPath(cast(R)`//@class!="table2"//@ab`);	// Should this work?
+//		assert(searchlist.length == 2);
+
+		logline("kxml.xml XPath predicate tests\n");
+		searchlist = xml.parseXPath(cast(R)`//tr[@ab<=7]/td`);
+		assert(searchlist.length == 1 && searchlist[0].getCData == cast(R)"Text 1.3");
+		searchlist = xml.parseXPath(cast(R)`//tr[@ab>=9 and th="Head"]/td`);
+		assert(searchlist.length == 1 && searchlist[0].getCData == cast(R)"Text 2.3");
 	}
 
 	struct custring {
