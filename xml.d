@@ -712,7 +712,7 @@ class XmlNode(R=string) if (isGoodType!R)
 	private ptrdiff_t readUntil(U)(R xsrc, U delim) {
 		// XXX FIX ME NOW
 		auto len = countUntil(xsrc, delim);
-		if (len = -1) return walkLength(xsrc);
+		if (len == -1) return walkLength(xsrc);
 		return len;
 	}
 
