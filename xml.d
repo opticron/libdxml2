@@ -1772,7 +1772,7 @@ version(unittest) {
 
 		// Start hashing functions (implicitly available and so need no compile-time test)
 		bool opEquals(custring b) {return data == b.data;}
-		const hash_t toHash() {
+		hash_t toHash() const nothrow @safe {
 			hash_t hash;
 			foreach (char c; data) {
 				hash = (hash * 9) + c;
