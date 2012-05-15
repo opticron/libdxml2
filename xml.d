@@ -468,14 +468,14 @@ class XmlNode(R=string) if (isGoodType!R)
 	/// This function dumps the xml structure in to pretty, tabbed format.
 	R toPrettyXml(R indent) {
 		R tmp;
-		if (getName.length) tmp = indent~asOpenTag()~to!R("\n");
+		if (!getName.empty) tmp = indent~asOpenTag()~to!R("\n");
 	
 		if (_children.length) {
 			for (int i = 0; i < _children.length; i++) {
 				// these guys are supposed to do their own indentation
-				tmp = tmp~_children[i].toPrettyXml(indent~to!R(getName.length?"	":""));
+				tmp = tmp~_children[i].toPrettyXml(indent~to!R(getName.empty?"":"	"));
 			}
-			if (getName.length) tmp = tmp~indent~asCloseTag()~to!R("\n");
+			if (!getName.empty) tmp = tmp~indent~asCloseTag()~to!R("\n");
 		}
 		return tmp;
 	}
@@ -930,7 +930,7 @@ class XmlNode(R=string) if (isGoodType!R)
 					res[j] = false;
 					continue;
 				}
-				if( comparator.length == 0 ) {
+				if( comparator.empty ) {
 					// Just check for existance
 					res[j] = true;
 					continue;
@@ -1741,13 +1741,6 @@ version(unittest) {
 				return concat;
 			} else static assert(0, "Operator "~op~" not implemented");
 		}
-
-		// Start hasLength functions
-		@property {
-			size_t length() const {return data.length;}
-			void length(size_t len) {data.length = len;}
-		}
-		// End hasLength functions
 
 		// Start InputRange functions
 		bool empty() const {return data.empty();}
