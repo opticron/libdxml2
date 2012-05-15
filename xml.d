@@ -131,7 +131,6 @@ template isGoodType(R)
 	{
 		R r = void;
 		static assert(isBidirectionalRange!(typeof(r)));
-		//static assert(isStringAssignable!(typeof(r)));
 		static assert(isSelfAssignable!(typeof(r)));
 		static assert(hasStringCast!(typeof(r)));
 		static assert(hasConcat!(typeof(r)));
@@ -153,16 +152,6 @@ template hasConcat(R)
 	{
 		R r = void;
 		r = r ~ r;
-	}));
-}
-
-template isStringAssignable(R)
-{
-	enum bool isStringAssignable = is(typeof(
-	{
-		R r = void;
-		string s = void;
-		r = s;
 	}));
 }
 
@@ -947,13 +936,18 @@ class XmlNode(R=string) if (isGoodType!R)
 					continue;
 				}
 				res[j] = compareXPathPredicate( elem1, comparator, elem2, getAttribute(elem1), caseSen );
-			}
-			else if (true) {
+			} else if (equal(elem1.save, ".")) {
+				if( compareXPathPredicate( elem1, comparator, elem2, this.getCData, caseSen )) {
+					res[j] = true;
+				}
+				debug(xpath)if(!res[j]) logline("did not match this node\n");
+			} else {
 				// assume elem1 is a tag
 				//if (!comparator.length || !elem2.length) throw new XPathError("Is this really an Error?");
 				foreach(child;getChildren) { 
-					if( child.isCData || child.isXmlComment || child.isXmlPI || child.getName != elem1 )
+					if( child.isCData || child.isXmlComment || child.isXmlPI || child.getName != elem1 ) {
 						continue;
+					}
 				
 					if( compareXPathPredicate( elem1, comparator, elem2, child.getCData, caseSen )) {
 						res[j] = true;
