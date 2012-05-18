@@ -1725,6 +1725,10 @@ version(unittest) {
 		assert(searchlist.length == 1 && equal(searchlist[0].getCData, "Text 1.3"));
 		searchlist = xml.parseXPath(to!R(`//tr[@ab>=9 and th="Head"]/td`));
 		assert(searchlist.length == 1 && equal(searchlist[0].getCData, "Text 2.3"));
+
+		logline("kxml.xml XPath cdata matching tests\n");
+		searchlist = xml.parseXPath(to!R(`//td[.="Text 2.3"]`));
+		assert(searchlist.length == 1);
 	}
 
 	struct custring {
