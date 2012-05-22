@@ -105,7 +105,7 @@ unittest {
 	assert(cast(custring)" asdf  a" == stripRight(cast(custring)a));
 }
 /* custom icmp using generic cmp w/ predicate */
-import std.algorithm:cmp,equal,startsWith,endsWith,countUntil;
+import std.algorithm:cmp,equal,startsWith,endsWith;
 int doCompare(C)(C a, C b) {return toLower(cast(dchar)a) < toLower(cast(dchar)b);}
 int icmp(R1,R2)(R1 s1, R2 s2) {
 	return cmp!(doCompare)(s1,s2);
@@ -699,10 +699,7 @@ class XmlNode(R=string) if (isGoodType!R)
 
 	// read data until the delimiter is found, return the index where the delimiter starts
 	private ptrdiff_t readUntil(U)(R xsrc, U delim) {
-		// XXX FIX ME NOW
-		auto len = countUntil(xsrc, delim);
-		if (len == -1) return walkLength(xsrc);
-		return len;
+		return countTo(xsrc, to!R(delim));
 	}
 
 	// basically to get the name off of open tags
@@ -775,7 +772,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		auto nextnode = getNextNode(xpath,truncxpath);
 		R predmatch;
 		// XXX need to be able to split the attribute match off even when it doesn't have [] around it
-		ptrdiff_t offset = countUntil(nextnode, "[");
+		ptrdiff_t offset = countTo(nextnode, to!R("["));
 		if (offset != -1) {
 			// rip out attribute string
 			predmatch = nextnode.save;
@@ -1630,6 +1627,11 @@ unittest {
 
 	runTests2(xmlstring2);
 	runTests2(cast(custring)xmlstring2);
+
+	string xmlstring3 = `<a><b id="footer">裂</b></a>`;
+
+	runTests3(xmlstring3);
+	runTests3(cast(custring)xmlstring3);
 }
 
 version(XML_main) {
@@ -1731,6 +1733,11 @@ version(unittest) {
 		assert(searchlist.length == 1);
 	}
 
+	void runTests3(R)(R xmlstring) {
+		logline("Running unicode parse tests\n");
+		auto xml = readDocument(xmlstring);
+	}
+
 	struct custring {
 		string data;
 		void opAssign(custring assgn) {data = assgn.data;}
@@ -1776,4 +1783,48 @@ version(unittest) {
 		// End hashing functions
 	}
 }
+
+auto countTo(R)(R haystack, R needle) if (isForwardRange!R) {
+	auto maxlen = walkLength(haystack.save);
+	if (needle.empty()) {
+		return maxlen;
+		//return needle;
+	}
+	// find beginning of needle
+	while(!haystack.empty()) {
+		if (haystack.front == needle.front) {
+			R nhaystack = haystack.save;
+			R nneedle = needle.save;
+			// walk it down
+			while(!nhaystack.empty() && !nneedle.empty()) {
+				if (nhaystack.front == nneedle.front) {
+					nhaystack.popFront();
+					nneedle.popFront();
+				} else {
+					// this is not the needle we're looking for
+					break;
+				}
+			}
+			// check exit conditions
+			if (nhaystack.empty() && !nneedle.empty()) {
+				// ran out of characters before finding the needle, done searching
+				// return empty since the needle did not exist in the haystack
+				//return nhaystack;
+				return maxlen;
+			}
+			// if needle is empty, success!
+			if (nneedle.empty()) {
+				//return haystack;
+				return maxlen - walkLength(haystack.save);
+			}
+			// if both still have elements, did not find match on this attempt, continue on
+		}
+		haystack.popFront();
+	}
+	// if this was going to succeed, it would have by now
+	// return empty range
+	//return haystack;
+	return maxlen;
+}
+
 
