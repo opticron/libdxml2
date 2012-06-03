@@ -59,7 +59,7 @@ private void logline(string str) {
 }
 
 import core.exception:RangeError;
-import std.range:isInputRange,isForwardRange,isBidirectionalRange,empty,front,popFront,save,back,popBack,popFrontN,popBackN,walkLength;
+import std.range:isInputRange,isForwardRange,isBidirectionalRange,empty,front,popFront,save,back,popBack,popFrontN,popBackN,walkLength,lockstep;
 import std.uni:isWhite,toLower;
 
 /* custom version of strip that uses the below */
@@ -105,10 +105,15 @@ unittest {
 	assert(cast(custring)" asdf  a" == stripRight(cast(custring)a));
 }
 /* custom icmp using generic cmp w/ predicate */
-import std.algorithm:cmp,equal,startsWith,endsWith;
-int doCompare(C)(C a, C b) {return toLower(cast(dchar)a) < toLower(cast(dchar)b);}
+import std.algorithm:equal,startsWith,endsWith;
 int icmp(R1,R2)(R1 s1, R2 s2) {
-	return cmp!(doCompare)(s1,s2);
+	while(!s1.empty && !s2.empty) {
+		if (toLower(s1.front) != toLower(s2.front)) return 1;
+		s1.popFront();
+		s2.popFront();
+	}
+	if (!s1.empty || !s2.empty) return 1;
+	return 0;
 }
 
 unittest {
@@ -121,6 +126,11 @@ unittest {
 	logline("custring icmp test\n");
 	assert(!.icmp(cast(custring)a,cast(custring)b));
 	assert(.icmp(cast(custring)a,cast(custring)c));
+	string d = "Edit";
+	string e = "EDO";
+	logline("weird failure test comparing "~d~" and "~e~"\n");
+	assert(.icmp(cast(custring)d,cast(custring)e));
+	assert(.icmp(d,e));
 }
 
 /* This is UGLY.  This is a combination of hasSlicing and hasLength with out the isNarrowString reliance.
@@ -942,7 +952,7 @@ class XmlNode(R=string) if (isGoodType!R)
 				// assume elem1 is a tag
 				//if (!comparator.length || !elem2.length) throw new XPathError("Is this really an Error?");
 				foreach(child;getChildren) { 
-					if( child.isCData || child.isXmlComment || child.isXmlPI || child.getName != elem1 ) {
+					if(child.isCData || child.isXmlComment || child.isXmlPI || !equal(child.getName,elem1)) {
 						continue;
 					}
 				
@@ -1013,10 +1023,11 @@ class XmlNode(R=string) if (isGoodType!R)
 				if (comparator.front == '!') neg = true;
 
 				if( !i1num || !i2num ) {
-					if ((!equal(elem1value, elem2) && caseSen) || (icmp(elem1value, elem2) != 0 && !caseSen)) {
-						debug(xpath)logline("search value "~to!string(elem2)~" did not match attribute value "~to!string(elem1value)~"\n");
+					if ((!equal(elem1value, elem2) && caseSen) || (icmp(elem1value, elem2) && !caseSen)) {
+						debug(xpath)logline("search value "~to!string(elem2)~" did not match attribute value "~to!string(elem1value)~"with case sensitivity "~to!string(caseSen?"en":"dis")~"abled\n");
 						lres = false;
 					} else {
+						debug(xpath)logline("search value "~to!string(elem2)~" matched attribute value "~to!string(elem1value)~" with case sensitivity "~to!string(caseSen?"en":"dis")~"abled\n");
 						lres = true;
 					}
 				} else {
@@ -1632,6 +1643,15 @@ unittest {
 
 	runTests3(xmlstring3);
 	runTests3(cast(custring)xmlstring3);
+
+	string xmlstring4 = `<table>
+	<tr><th>Edit</th> <td>1</td></tr>
+	<tr><th>EDO</th>  <td>2</td></tr>
+	<tr><th>Other</th><td>3</td></tr>
+	</table>`;
+
+	runTests4(xmlstring4);
+	runTests4(cast(custring)xmlstring4);
 }
 
 version(XML_main) {
@@ -1736,6 +1756,14 @@ version(unittest) {
 	void runTests3(R)(R xmlstring) {
 		logline("Running unicode parse tests\n");
 		auto xml = readDocument(xmlstring);
+	}
+
+	void runTests4(R)(R xmlstring) {
+		logline("Running unicode parse tests\n");
+		auto xml = readDocument(xmlstring);
+		auto list = xml.parseXPath(to!R(`//tr[th="Edit"]/td`));
+		logline("got "~to!string(list.length)~" results\n");
+		assert( list.length == 1 );
 	}
 
 	struct custring {
