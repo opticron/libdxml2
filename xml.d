@@ -59,7 +59,7 @@ private void logline(string str) {
 }
 
 import core.exception:RangeError;
-import std.range:isInputRange,isForwardRange,isBidirectionalRange,empty,front,popFront,save,back,popBack,popFrontN,popBackN,walkLength,lockstep;
+import std.range:isInputRange,isForwardRange,isBidirectionalRange,empty,front,popFront,save,back,popBack,popFrontN,popBackN,walkLength,lockstep,ElementType,isInfinite;
 import std.uni:isWhite,toLower;
 
 /* custom version of strip that uses the below */
@@ -105,7 +105,7 @@ unittest {
 	assert(cast(custring)" asdf  a" == stripRight(cast(custring)a));
 }
 /* custom icmp using generic cmp w/ predicate */
-import std.algorithm:equal,startsWith,endsWith;
+import std.algorithm:equal,startsWith,endsWith,map,reduce;
 int icmp(R1,R2)(R1 s1, R2 s2) {
 	while(!s1.empty && !s2.empty) {
 		if (toLower(s1.front) != toLower(s2.front)) return 1;
@@ -143,7 +143,6 @@ template isGoodType(R)
 		static assert(isBidirectionalRange!(typeof(r)));
 		static assert(isSelfAssignable!(typeof(r)));
 		static assert(hasStringCast!(typeof(r)));
-		static assert(hasConcat!(typeof(r)));
 	}));
 }
 
@@ -156,15 +155,6 @@ template hasStringCast(R)
 	}));
 }
 
-template hasConcat(R)
-{
-	enum bool hasConcat = is(typeof(
-	{
-		R r = void;
-		r = r ~ r;
-	}));
-}
-
 template isSelfAssignable(R)
 {
 	enum bool isSelfAssignable = is(typeof(
@@ -174,6 +164,7 @@ template isSelfAssignable(R)
 	}));
 }
 
+import std.array:appender;
 
 /**
  * Read an entire string into a tree of XmlNodes.
@@ -250,8 +241,6 @@ class XmlNode(R=string) if (isGoodType!R)
 	protected R[R] _attributes;
 	protected XmlNode!R[]      _children;
 
-
-
 	static this(){}
 
 	/// Construct an empty XmlNode.
@@ -278,9 +267,9 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// Get the specified attribute, or return null if the XmlNode doesn't have that attribute.
-	R getAttribute(R name) {
+	R getAttribute(const(R) name) {
 		if (name in _attributes) {
-			return xmlDecode(_attributes[name]);
+			return xmlDecode!R(_attributes[name]);
 		}
 		return to!R("");
 	}
@@ -290,7 +279,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		R[R]tmp;
 		// this is inefficient as it is run every time, but doesn't hurt parsing speed
 		foreach(key;_attributes.keys) {
-			tmp[key] = xmlDecode(_attributes[key]);
+			tmp[key] = xmlDecode!R(_attributes[key]);
 		}
 		return tmp;
 	}
@@ -298,20 +287,20 @@ class XmlNode(R=string) if (isGoodType!R)
 	/// Set an attribute to a string value.
 	/// The attribute is created if it doesn't exist.
 	XmlNode!R setAttribute(R name, R value) {
-		_attributes[name] = xmlEncode(value);
+		_attributes[cast(immutable)(name)] = xmlEncode!R(value);
 		return this;
 	}
 
 	/// Set an attribute to an integer value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
 	XmlNode!R setAttribute(R name, long value) {
-		return setAttribute(name, to!R(to!string(value)));
+		return setAttribute(name, to!R(to!(string)(value)));
 	}
 
 	/// Set an attribute to a float value (stored internally as a string).
 	/// The attribute is created if it doesn't exist.
 	XmlNode!R setAttribute(R name, float value) {
-		return setAttribute(name, to!R(to!string(value)));
+		return setAttribute(name, to!R(to!(string)(value)));
 	}
 
 	/// Remove the attribute with name.
@@ -377,12 +366,12 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function makes life easier for those looking to pull cdata from a tag, in the case of multiple nodes, it pulls all first level cdata nodes.
-	R getCData() {
-		R tmp;
-		foreach(child;_children) if (child.isCData) {
-			tmp = tmp ~ child.getCData(); 
+	ElementType!R[]getCData() {
+		auto app = appender!(ElementType!R[])();
+		foreach (child;map!("a.getCData()")(_children)) {
+			app.put(child);
 		}
-		return tmp;
+		return app.data;
 	}
 
 	/// This function resets the node to a default state
@@ -419,45 +408,54 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function gives you the inner xml as it would appear in the document.
-	auto getInnerXML() {
-		R tmp;
-		foreach(child;_children) {
-			tmp = tmp ~ child.toXml(); 
+	ElementType!R[]getInnerXML() {
+		auto app = appender!(ElementType!R[])();
+		foreach (child;map!("a.toXml()")(_children)) {
+			app.put(child);
 		}
-		return tmp;
+		return app.data;
 	}
 
 	// internal function to generate opening tags
-	R asOpenTag() {
+	ElementType!R[]asOpenTag() {
+		auto app = appender!(ElementType!R[])();
 		if (_name.empty) {
-			return _name;
+			return app.data;
 		}
-		auto s = to!R("<") ~ _name ~ genAttrString();
-
-		if (_children.length == 0) {
-			s = s ~ to!R(" /"); // We want <blah /> if the node has no children.
-		}
-		s = s ~ to!R(">");
-
-		return s;
+		app.put("<");
+		app.put(_name);
+		app.put(genAttrString());
+		app.put(!_children.length?" /":"");
+		app.put(">");
+		return app.data;
 	}
 
 	// internal function used to generate the attribute list
-	protected auto genAttrString() {
-		R ret;
-		foreach (keys,values;_attributes) {
-			ret = ret ~ to!R(" ") ~ keys ~ to!R("=\"") ~ values ~ to!R("\"");
+	protected ElementType!R[]genAttrString() {
+		auto app = appender!(ElementType!R[])();
+		foreach (attrkey;_attributes.keys) {
+			app.put(" ");
+			app.put(attrkey);
+			app.put("=\"");
+			app.put(_attributes[attrkey]);
+			app.put("\"");
 		}
-		return ret;
+		return app.data;
 	}
 
 	// internal function to generate closing tags
-	R asCloseTag() {
+	ElementType!R[]asCloseTag() {
+		auto app = appender!(ElementType!R[])();
 		if (_name.empty) {
-			return _name;
+			return app.data;
 		}
-		if (!_children.length) return to!R(""); // don't need it.  Leaves close themselves via the <blah /> syntax.
-		return to!R("</") ~ _name ~ to!R(">");
+		if (!_children.length) { // don't need it.  Leaves close themselves via the <blah /> syntax.
+			return app.data;
+		}
+		app.put("</");
+		app.put(_name);
+		app.put(">");
+		return app.data;
 	}
 
 	final protected bool isLeaf() {
@@ -465,29 +463,36 @@ class XmlNode(R=string) if (isGoodType!R)
 	}
 
 	/// This function dumps the xml structure to a string with no newlines and no linefeeds to be output.
-	R toXml() {
-		auto tmp = asOpenTag();
-
-		if (_children.length) {
-			tmp = tmp ~ getInnerXML();
-			tmp = tmp ~ asCloseTag();
-		}
-		return tmp;
+	ElementType!R[]toXml() {
+		auto app = appender!(ElementType!R[])();
+		app.put(asOpenTag());
+		app.put(getInnerXML());
+		app.put(asCloseTag());
+		return app.data;
 	}
 
 	/// This function dumps the xml structure in to pretty, tabbed format.
-	R toPrettyXml(R indent) {
-		R tmp;
-		if (!getName.empty) tmp = indent~asOpenTag()~to!R("\n");
-	
-		if (_children.length) {
-			for (int i = 0; i < _children.length; i++) {
-				// these guys are supposed to do their own indentation
-				tmp = tmp~_children[i].toPrettyXml(indent~to!R(getName.empty?"":"	"));
-			}
-			if (!getName.empty) tmp = tmp~indent~asCloseTag()~to!R("\n");
+	ElementType!R[]toPrettyXml(string indent = "") {
+		auto app = appender!(ElementType!R[])();
+		// open tag
+		if (!getName.empty) {
+			app.put(indent);
+			app.put(asOpenTag());
+			app.put("\n");
 		}
-		return tmp;
+		// innards
+		auto newIndent = indent ~ (getName.empty?"":"	");
+		void localtopretty(XmlNode!R a) {
+			app.put(a.toPrettyXml(newIndent));
+		}
+		map!( localtopretty )(_children);
+		// close tag
+		if (_children.length && !getName.empty) {
+			app.put(indent);
+			app.put(asCloseTag());
+			app.put("\n");
+		}
+		return app.data;
 	}
 
 	/// Add children from a string containing valid xml.
@@ -536,7 +541,7 @@ class XmlNode(R=string) if (isGoodType!R)
 		popFrontN(xsrc, slice);
 		xsrc.popFront();
 		debug(xml)logline("I found a closing tag:"~to!string(token)~"\n");
-		if (icmp(token, parent.getName()) != 0) throw new XmlError("Wrong close tag: "~to!string(token)~" for parent tag "~to!string(parent.getName));
+		if (icmp(token, parent.getName()) != 0) throw new XmlError("Wrong close tag '"~to!string(token)~"' for parent tag "~to!string(parent.getName));
 	}
 
 	// rip off a xml processing instruction, like the ones that come at the beginning of xml documents
@@ -768,7 +773,7 @@ class XmlNode(R=string) if (isGoodType!R)
 			throw new XmlError("Unexpected end of input for attribute "~to!string(name)~" in node "~to!string(xml.getName));
 		}
 		debug(xml)logline("Got attr "~to!string(name)~" and value \""~to!string(value)~"\"\n");
-		xml._attributes[name] = value;
+		xml._attributes[cast(immutable)(name)] = value;
 		attrstr = stripLeft(attrstr);
 	}
 
@@ -991,12 +996,13 @@ class XmlNode(R=string) if (isGoodType!R)
 		return ret;
 	}
 
-	private bool compareXPathPredicate( R elem1, R comparator, R elem2, R elem1value, bool caseSen )
+	private bool compareXPathPredicate(U)( R elem1, R comparator, R elem2, U elem1value, bool caseSen )
 	{
+		auto e1vstr = to!string(elem1value);
 		if (!comparator.empty) {
 			// make sure that if we pulled a comparator, there's something to compare on the other side
 			if (elem2.empty) throw new XPathError("Got a comparator without anything to compare");
-			bool lres,i1num = isNumeric(to!string(elem1value)),i2num = isNumeric(to!string(elem2));
+			bool lres,i1num = isNumeric(e1vstr),i2num = isNumeric(to!string(elem2));
 			if (comparator.front == '<' || comparator.front == '>') {
 				// Must be numeric
 				if( !i2num )
@@ -1006,7 +1012,7 @@ class XmlNode(R=string) if (isGoodType!R)
 				}
 			
 				// get numeric equivalents
-				double i1 = to!double(to!string(elem1value));
+				double i1 = to!double(e1vstr);
 				double i2 = to!double(to!string(elem2));
 
 				if (comparator.front == '<') {
@@ -1023,16 +1029,16 @@ class XmlNode(R=string) if (isGoodType!R)
 				if (comparator.front == '!') neg = true;
 
 				if( !i1num || !i2num ) {
-					if ((!equal(elem1value, elem2) && caseSen) || (icmp(elem1value, elem2) && !caseSen)) {
-						debug(xpath)logline("search value "~to!string(elem2)~" did not match attribute value "~to!string(elem1value)~"with case sensitivity "~to!string(caseSen?"en":"dis")~"abled\n");
+					if ((!equal(e1vstr, elem2) && caseSen) || (icmp(e1vstr, elem2) && !caseSen)) {
+						debug(xpath)logline("search value "~to!string(elem2)~" did not match attribute value "~e1vstr~"with case sensitivity "~to!string(caseSen?"en":"dis")~"abled\n");
 						lres = false;
 					} else {
-						debug(xpath)logline("search value "~to!string(elem2)~" matched attribute value "~to!string(elem1value)~" with case sensitivity "~to!string(caseSen?"en":"dis")~"abled\n");
+						debug(xpath)logline("search value "~to!string(elem2)~" matched attribute value "~e1vstr~" with case sensitivity "~to!string(caseSen?"en":"dis")~"abled\n");
 						lres = true;
 					}
 				} else {
 					// get numeric equivalents
-					double i1 = to!double(to!string(elem1value));
+					double i1 = to!double(e1vstr);
 					double i2 = to!double(to!string(elem2));
 					lres = (i1 == i2);
 				}
@@ -1142,13 +1148,15 @@ class CData(R=string) : XmlNode!R
 
 	/// Get CData string associated with this object.
 	/// Returns: Parsed Character Data with decoded XML entities
-	override R getCData() {
-		return xmlDecode!R(_cdata);
+	override ElementType!R[]getCData() {
+		auto app = appender!(ElementType!R[])();
+		app.put(xmlDecode!R(_cdata));
+		return app.data;
 	}
 
 	/// This function assumes data is coming from user input, possibly with unescaped XML entities that need escaping.
 	override CData!R setCData(R cdata) {
-		_cdata = xmlEncode(cdata);
+		_cdata = xmlEncode!R(cdata);
 		return this;
 	}
 
@@ -1163,16 +1171,25 @@ class CData(R=string) : XmlNode!R
 	}
 
 	/// This outputs escaped XML entities for use on the network or in a document.
-	protected override R toXml() {
-		return _cdata;
+	protected override ElementType!R[]toXml() {
+		auto app = appender!(ElementType!R[])();
+		app.put(_cdata);
+		return app.data;
 	}
 
 	/// This outputs escaped XML entities for use on the network or in a document in pretty, tabbed format.
-	protected override R toPrettyXml(R indent) { 
-		return indent~toXml()~to!R("\n");
+	protected override ElementType!R[]toPrettyXml(string indent = "") {
+		auto app = appender!(ElementType!R[])();
+		app.put(indent);
+		app.put(toXml());
+		app.put("\n");
+		return app.data;
 	}
 
-	override R asCloseTag() { return to!R(""); }
+	override ElementType!R[]asCloseTag() {
+		auto app = appender!(ElementType!R[])();
+		return app.data;
+	}
 
 	/// This throws an exception because CData nodes do not have names.
 	override R getName() {
@@ -1190,7 +1207,7 @@ class CData(R=string) : XmlNode!R
 	}
 
 	/// This throws an exception because CData nodes do not have attributes.
-	override R getAttribute(R name) {
+	override R getAttribute(const(R) name) {
 		throw new XmlError("CData nodes do not have attributes to get.");
 	}
 
@@ -1247,12 +1264,13 @@ class XmlPI(R=string) : XmlNode!R {
 
 	/// This node can't have children, and so can't have CData.
 	/// Should this throw an exception?
-	override R getCData() {
-		return to!R("");
+	override ElementType!R[]getCData() {
+		auto app = appender!(ElementType!R[])();
+		return app.data;
 	}
 
 	/// Override toXml for output to be used by parsers.
-	override R toXml() {
+	override ElementType!R[]toXml() {
 		return asOpenTag();
 	}
 
@@ -1268,19 +1286,31 @@ class XmlPI(R=string) : XmlNode!R {
 	}
 
 	/// Pretty print to be used by parsers.
-	protected override R toPrettyXml(R indent = to!R("")) {
-		return indent~asOpenTag()~to!R("\n");
+	protected override ElementType!R[]toPrettyXml(string indent = "") {
+		auto app = appender!(ElementType!R[])();
+		app.put(indent);
+		app.put(asOpenTag());
+		app.put("\n");
+		return app.data;
 	}
 
 	// internal function to generate opening tags
-	override R asOpenTag() {
-		if (_name.empty) return to!R("");
-		auto s = to!R("<?") ~ _name ~ genAttrString() ~ to!R("?>");
-		return s;
+	override ElementType!R[]asOpenTag() {
+		auto app = appender!(ElementType!R[])();
+		if (!_name.empty) {
+			app.put("<?");
+			app.put(_name);
+			app.put(genAttrString());
+			app.put("?>");
+		}
+		return app.data;
 	}
 
 	// internal function to generate closing tags
-	override R asCloseTag() { return to!R(""); }
+	override ElementType!R[]asCloseTag() {
+		auto app = appender!(ElementType!R[])();
+		return app.data;
+	}
 
 	/// You can't add a child to something that can't have children.  There is no adoption in XML world.
 	override XmlNode!R addChild(XmlNode!R newNode) {
@@ -1311,13 +1341,14 @@ class XmlComment(R=string) : XmlNode!R {
 	this(){}
 	this(R comment) {
 		_comment = comment;
-		super(to!R(""));
+		super();
 	}
 
 	/// This node can't have children, and so can't have CData.
 	/// Should this throw an exception?
-	override R getCData() {
-		return to!R("");
+	override ElementType!R[]getCData() {
+		auto app = appender!(ElementType!R[])();
+		return app.data;
 	}
 
 	/// This function resets the node to a default state
@@ -1331,25 +1362,35 @@ class XmlComment(R=string) : XmlNode!R {
 	}
 
 	/// Override toXml for output to be used by parsers.
-	override R toXml() {
+	override ElementType!R[]toXml() {
 		return asOpenTag();
 	}
 
 	/// Pretty print to be used by parsers.
-	protected override R toPrettyXml(R indent = to!R("")) {
-		return indent~asOpenTag()~to!R("\n");
+	protected override ElementType!R[]toPrettyXml(string indent = "") {
+		auto app = appender!(ElementType!R[])();
+		app.put(indent);
+		app.put(asOpenTag());
+		app.put("\n");
+		return app.data;
 	}
 
 	// internal function to generate opening tags
-	protected override R asOpenTag() {
-		if (_name.empty) {
-			return to!R("");
+	protected override ElementType!R[]asOpenTag() {
+		auto app = appender!(ElementType!R[])();
+		if (!_name.empty) {
+			app.put("<!--");
+			app.put(_comment);
+			app.put("-->");
 		}
-		return to!R("<!--") ~ _comment  ~ to!R("-->");
+		return app.data;
 	}
 
 	// internal function to generate closing tags
-	override R asCloseTag() { return to!R(""); }
+	override ElementType!R[]asCloseTag() { 
+		auto app = appender!(ElementType!R[])();
+		return app.data;
+	}
 
 	/// The members of Project Mayhem have no name... (this throws an exception)
 	override R getName() {
@@ -1367,7 +1408,7 @@ class XmlComment(R=string) : XmlNode!R {
 	}
 
 	/// Ditto. (this throws an exception)
-	override R getAttribute(R name) {
+	override R getAttribute(const(R) name) {
 		throw new XmlError("Comment nodes do not have attributes to get.");
 	}
 
@@ -1555,33 +1596,33 @@ class XmlDocument(R=string) : XmlNode!R {
 
 /// Encode characters such as &, <, >, etc. as their xml/html equivalents
 auto xmlEncode(R)(R src) {
-        src = replace(to!string(src), "&", "&amp;");
-        src = replace(to!string(src), "<", "&lt;");
-        src = replace(to!string(src), ">", "&gt;");
-        src = replace(to!string(src), "\"", "&quot;");
-        src = replace(to!string(src), "'", "&apos;");
+        src = to!R(replace(to!string(src), "&", "&amp;"));
+        src = to!R(replace(to!string(src), "<", "&lt;"));
+        src = to!R(replace(to!string(src), ">", "&gt;"));
+        src = to!R(replace(to!string(src), "\"", "&quot;"));
+        src = to!R(replace(to!string(src), "'", "&apos;"));
         return src;
 }
 
 /// Convert xml-encoded special characters such as &amp;amp; back to &amp;.
 auto xmlDecode(R)(R src) {
-        src = replace(to!string(src), "&lt;",  "<");
-        src = replace(to!string(src), "&gt;",  ">");
-        src = replace(to!string(src), "&apos;", "'");
-        src = replace(to!string(src), "&quot;",  "\"");
+        src = to!R(replace(to!string(src), "&lt;",  "<"));
+        src = to!R(replace(to!string(src), "&gt;",  ">"));
+        src = to!R(replace(to!string(src), "&apos;", "'"));
+        src = to!R(replace(to!string(src), "&quot;",  "\""));
 	// take care of decimal character entities
-	src = regrep(to!string(src),"&#\\d{1,8};",(string m) {
+	src = to!R(regrep(to!string(src),"&#\\d{1,8};",(string m) {
 		auto cnum = m[2..m.length-1];
 		dchar dnum = cast(dchar)to!int(cnum);
 		return quickUTF8(dnum);
-	});
+	}));
 	// take care of hex character entities
-	src = regrep(to!string(src),"&#[xX][0-9a-fA-F]{1,8};",(string m) {
+	src = to!R(regrep(to!string(src),"&#[xX][0-9a-fA-F]{1,8};",(string m) {
 		auto cnum = m[3..$-1];
 		dchar dnum = hex2dchar(cnum);
 		return quickUTF8(dnum);
-	});
-        src = replace(to!string(src), "&amp;", "&");
+	}));
+        src = to!R(replace(to!string(src), "&amp;", "&"));
         return src;
 }
 
@@ -1662,9 +1703,10 @@ version(unittest) {
 	void runTests(R)(R xmlstring) {
 		logline("Running "~R.stringof~" tests\n");
 		auto xml = readDocument(xmlstring);
-		xmlstring = xml.toXml;
+		auto modxmlstring = xml.toXml;
+		modxmlstring = readDocument(modxmlstring).toXml;
  		// ensure that the string doesn't mutate after a second reading, it shouldn't
-		assert((readDocument(xmlstring.save).toXml == xmlstring));
+ 		assert(equal(readDocument(modxmlstring).toXml, modxmlstring));
 
 		logline("kxml.xml XPath test\n");
 		auto searchlist = xml.parseXPath(to!R("message/flags"));
@@ -1771,15 +1813,6 @@ version(unittest) {
 		void opAssign(custring assgn) {data = assgn.data;}
 		// XXX should't need it?
 		void opAssign(string assgn) {data = assgn;}
-
-		// XXX does this have something in ranges?
-		custring opBinary(string op)(custring b) {
-			static if (op == "~") {
-				custring concat;
-				concat.data = data~b.data;
-				return concat;
-			} else static assert(0, "Operator "~op~" not implemented");
-		}
 
 		// Start InputRange functions
 		bool empty() const {return data.empty();}
